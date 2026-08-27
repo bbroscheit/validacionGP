@@ -86,17 +86,21 @@ const getVentas = async ({ sucursal, fechaDesde, fechaHasta, soloConP = true }) 
   `);
   const totalCount = count.recordset[0].total;
 
-  // Tipo de contribuyente: no vive en SOP30200. Se resuelve por cliente (AWLI_RM00101,
-  // extensión del maestro de clientes con RESP_TYPE) contra la tabla de sistema
-  // DYNAMICS..AWLI40330 que tiene la descripción (RESPBLE: RI/CF/EX/Iva No Alcanzado).
-  // Confirmado que este es el mismo camino que usa la vista II_VentasProvincia ya
-  // existente en la base para este mismo dato.
+  // Tipo de contribuyente: no vive en SOP30200. Se resuelve por cliente cruzando
+  // II_DATOS_CLIE.codigo (columna CodigoCliente = CUSTNMBR) contra la tabla de sistema
+  // DYNAMICS..AWLI40330 que tiene la descripción (RESPBLE: RI/MO/CF/EX/Iva No Alcanzado).
+  // OJO: no usar AWLI_RM00101.RESP_TYPE - ese campo viene "colapsado" a propósito
+  // (queda "01/RI" tanto para RI como para Monotributistas, porque hace años la
+  // facturación era igual para ambos y nunca se separó). II_DATOS_CLIE.codigo es el
+  // mismo dato pero sin ese colapso (viene de New_TipodeContribuyente en el CRM), y es
+  // el que realmente distingue RI de MO. La vista II_VentasProvincia ya existente en la
+  // base usa el camino viejo (AWLI_RM00101) y por lo tanto tiene el mismo problema.
   const headerRequest = bindFilters(pool.request());
   const header = await headerRequest.query(`
     SELECT TOP (${MAX_ROWS}) H.*, CT.RESPBLE AS TipodeContribuyente
     FROM SOP30200 AS H
-    LEFT JOIN AWLI_RM00101 AS RT ON RT.CUSTNMBR = H.CUSTNMBR
-    LEFT JOIN DYNAMICS..AWLI40330 AS CT ON CT.RESP_TYPE = RT.RESP_TYPE
+    LEFT JOIN II_DATOS_CLIE AS RT ON LTRIM(RTRIM(RT.CodigoCliente)) = LTRIM(RTRIM(H.CUSTNMBR))
+    LEFT JOIN DYNAMICS..AWLI40330 AS CT ON LTRIM(RTRIM(CT.RESP_TYPE)) = LTRIM(RTRIM(RT.codigo))
     WHERE
       (@sucursal IS NULL OR H.LOCNCODE = @sucursal)
       AND (@fechaDesde IS NULL OR H.DOCDATE >= @fechaDesde)

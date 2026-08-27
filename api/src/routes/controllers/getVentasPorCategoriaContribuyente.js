@@ -4,10 +4,18 @@ const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
 // Categoría = GL00100.USERDEF2 (uno de los 4 campos "definidos por el usuario" de la
 // cuenta contable: SERVICIOS, ALQUILERES, INV. BIENES DE USO, VENTA DE BS DE USO,
 // COMPRA DE BIENES, LOCACIONES - en blanco para deudores/impuestos).
-// Tipo de contribuyente: no vive en SOP30200, se resuelve por cliente (AWLI_RM00101)
-// contra DYNAMICS..AWLI40330 (RESPBLE: RI/CF/EX/Iva No Alcanzado) - mismo camino que
-// getVentas.js. Se llega al cliente cruzando G.ORDOCNUM contra SOP30200.SOPNUMBE, igual
-// que en getVentasPorSucursalCuenta.js.
+// Tipo de contribuyente: no vive en SOP30200, se resuelve por cliente cruzando
+// II_DATOS_CLIE.codigo (columna CodigoCliente = CUSTNMBR) contra DYNAMICS..AWLI40330
+// (RESPBLE: RI/MO/CF/EX/Iva No Alcanzado) - mismo camino que getVentas.js.
+// OJO: no usar AWLI_RM00101.RESP_TYPE para esto - ese campo viene "colapsado" a
+// propósito (queda "01/RI" tanto para RI como para Monotributistas, porque hace años
+// la facturación era igual para ambos y nadie lo separó). II_DATOS_CLIE.codigo es el
+// mismo dato pero sin ese colapso (viene de New_TipodeContribuyente en el CRM), y es
+// el que realmente distingue RI de MO. Confirmado contra PRD08: factura
+// FVPA0040-00001281 (cliente 727) da MO con este join, RI con el viejo - y el total
+// general de julio no cambia (473.560.303,27 en ambos casos, ver más abajo).
+// Se llega al cliente cruzando G.ORDOCNUM contra SOP30200.SOPNUMBE, igual que en
+// getVentasPorSucursalCuenta.js.
 // Se excluyen dos cosas nada más: la cuenta de deudores por ventas (113110-01-000, la
 // contrapartida de cobro) y las cuentas de impuestos (A.ACCATNUM = 30 - categoría de
 // cuenta de GP que agrupa TODAS las cuentas de IVA/IIBB/retenciones, no solo las 3 más
@@ -68,8 +76,8 @@ const getVentasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta, solo
     INNER JOIN GL00105 AS N ON N.ACTINDX = G.ACTINDX
     INNER JOIN GL00100 AS A ON A.ACTINDX = G.ACTINDX
     LEFT JOIN SOP30200 AS H ON LTRIM(RTRIM(H.SOPNUMBE)) = LTRIM(RTRIM(G.ORDOCNUM))
-    LEFT JOIN AWLI_RM00101 AS RT ON RT.CUSTNMBR = H.CUSTNMBR
-    LEFT JOIN DYNAMICS..AWLI40330 AS CT ON CT.RESP_TYPE = RT.RESP_TYPE
+    LEFT JOIN II_DATOS_CLIE AS RT ON LTRIM(RTRIM(RT.CodigoCliente)) = LTRIM(RTRIM(H.CUSTNMBR))
+    LEFT JOIN DYNAMICS..AWLI40330 AS CT ON LTRIM(RTRIM(CT.RESP_TYPE)) = LTRIM(RTRIM(RT.codigo))
     WHERE
       LTRIM(RTRIM(G.SOURCDOC)) = 'SJ'
       AND G.TRXDATE >= @fechaDesde
