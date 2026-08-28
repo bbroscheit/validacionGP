@@ -13,6 +13,14 @@ const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
 // impuestos (ACCATNUM=9: IVA Crédito Fiscal y percepciones).
 // Igual que en Gastos/Compras: GL20000.VOIDED no sirve (siempre da 0), se cruza contra
 // PM30200/PM20000.VOIDED=1 por DOCNUMBR+VENDORID.
+//
+// RI (Gravado) vs RI (No Gravado): dentro de "RI" hay comprobantes sin IVA discriminado
+// (ej. órdenes de pago "OPP-...", confirmado contra PRD08 con proveedores RESP_TYPE=01
+// y TAXAMNT=0 en julio/2026) que no deberían mezclarse con las facturas normales con
+// IVA. Se distingue por PM30200.TAXAMNT (o PM20000.TAXAMNT si el comprobante sigue
+// abierto) del comprobante: si es distinto de 0, "RI (Gravado)"; si es 0 o no se
+// encuentra el comprobante en ninguna de las dos tablas, "RI (No Gravado)". Solo se
+// splitea RI - el resto de los tipos de contribuyente quedan como están.
 const MONEDA_VACIA = 'En Blanco';
 const CUENTAS_CONTRAPARTIDA = ['211101-01-000', '223202-01-000'];
 const ACCATNUM_IMPUESTOS = 9;
@@ -70,6 +78,7 @@ const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta }) =
     SELECT TOP (${MAX_ROWS})
       NULLIF(LTRIM(RTRIM(A.USERDEF2)), '') AS Categoria,
       NULLIF(LTRIM(RTRIM(CT.RESPBLE)), '') AS TipoContribuyente,
+      COALESCE(HH.TAXAMNT, HO.TAXAMNT) AS TaxAmt,
       LTRIM(RTRIM(G.ORDOCNUM)) AS Comprobante,
       LTRIM(RTRIM(N.ACTNUMST)) AS Cuenta,
       LTRIM(RTRIM(A.ACTDESCR)) AS CuentaDescripcion,
@@ -80,6 +89,8 @@ const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta }) =
     INNER JOIN GL00100 AS A ON A.ACTINDX = G.ACTINDX
     LEFT JOIN AWLI_PM00200 AS PT ON LTRIM(RTRIM(PT.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
     LEFT JOIN DYNAMICS..AWLI40330 AS CT ON CT.RESP_TYPE = PT.RESP_TYPE
+    LEFT JOIN PM30200 AS HH ON LTRIM(RTRIM(HH.DOCNUMBR)) = LTRIM(RTRIM(G.ORDOCNUM)) AND LTRIM(RTRIM(HH.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
+    LEFT JOIN PM20000 AS HO ON LTRIM(RTRIM(HO.DOCNUMBR)) = LTRIM(RTRIM(G.ORDOCNUM)) AND LTRIM(RTRIM(HO.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
     WHERE
       LTRIM(RTRIM(G.SOURCDOC)) IN ('PMTRX', 'PMVVR')
       AND G.TRXDATE >= @fechaDesde
@@ -90,14 +101,20 @@ const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta }) =
     ORDER BY Categoria ASC
   `);
 
-  const base = detalle.recordset.map((row) => ({
-    Categoria: row.Categoria || MONEDA_VACIA,
-    TipoContribuyente: row.TipoContribuyente || MONEDA_VACIA,
-    Comprobante: row.Comprobante,
-    Cuenta: row.Cuenta,
-    CuentaDescripcion: row.CuentaDescripcion,
-    Monto: (row.DEBITAMT || 0) - (row.CRDTAMNT || 0),
-  }));
+  const base = detalle.recordset.map((row) => {
+    let tipoContribuyente = row.TipoContribuyente || MONEDA_VACIA;
+    if (tipoContribuyente === 'RI') {
+      tipoContribuyente = row.TaxAmt ? 'RI (Gravado)' : 'RI (No Gravado)';
+    }
+    return {
+      Categoria: row.Categoria || MONEDA_VACIA,
+      TipoContribuyente: tipoContribuyente,
+      Comprobante: row.Comprobante,
+      Cuenta: row.Cuenta,
+      CuentaDescripcion: row.CuentaDescripcion,
+      Monto: (row.DEBITAMT || 0) - (row.CRDTAMNT || 0),
+    };
+  });
 
   const agrupado = new Map();
   base.forEach((row) => {
