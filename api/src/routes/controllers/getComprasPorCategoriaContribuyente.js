@@ -14,22 +14,28 @@ const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
 // Igual que en Gastos/Compras: GL20000.VOIDED no sirve (siempre da 0), se cruza contra
 // PM30200/PM20000.VOIDED=1 por DOCNUMBR+VENDORID.
 //
-// RI (Gravado) vs RI (No Gravado): dentro de "RI" hay comprobantes sin IVA discriminado
-// (ej. órdenes de pago "OPP-...", confirmado contra PRD08 con proveedores RESP_TYPE=01
-// y sin impuesto en julio/2026) que no deberían mezclarse con las facturas normales con
-// IVA. Se distingue por el detalle impositivo real del comprobante (AWLI_IMPUESTOS,
-// una fila por TAXDTLID aplicado al voucher - "IVACF 21%", "IVACF 0% NOGRAV", etc.),
-// no por PM30200/PM20000.TAXAMNT del header: se busca el VCHRNMBR del comprobante en
-// PM30200/PM20000 y se suma el impuesto de todas sus líneas en AWLI_IMPUESTOS. Si algún
-// TAXDTLID tiene importe de impuesto ≠ 0, es "RI (Gravado)"; si no, "RI (No Gravado)".
-// Solo se splitea RI - el resto de los tipos de contribuyente quedan como están.
-// OJO: un comprobante puede dar Monto negativo (una NC) y aun así clasificar
-// correctamente como No Gravado si su propio detalle impositivo es "0% NOGRAV" - eso
-// no es un bug de esta query, es el dato real cargado en GP para ese comprobante.
+// RI (Gravado) vs RI (No Gravado): dentro de "RI" hay comprobantes que mezclan, en el
+// MISMO comprobante, un tramo gravado y un tramo no gravado (ej. FC A0044-00123808:
+// $249.547,69 a IVACF 21% + $39.224,52 a IVACF 0% NOGRAV, confirmado contra PRD08 -
+// "Consulta de impuestos ctas. por pagar" en GP). Clasificar el comprobante entero como
+// un solo tipo (como se hacía antes, mirando si TENÍA algo de impuesto) esconde ese
+// tramo no gravado. Lo correcto es prorratear: por comprobante (VCHRNMBR), se suma la
+// base de las líneas IVACF con tasa (10.5%/21%/27% = Gravado) contra la base de las
+// líneas IVACF 0% NOGRAV/EXE (= No Gravado) en AWLI_IMPUESTOS, y esa proporción se
+// aplica sobre el importe de cada línea contable del comprobante - partiéndola en dos
+// filas cuando corresponde. Se ignoran a propósito los TAXDTLID que no son "IVACF"
+// (percepciones IIBB "IB-PC-*"/"IB-PV-*", retenciones "IVA-PC-RG3337*", "SIRCREB", y los
+// "IVADF*" que son de ventas) porque reusan la misma base ya contada en el IVACF
+// correspondiente - sumarlos duplicaría el importe. Si el comprobante no tiene ninguna
+// línea IVACF (ej. las órdenes de pago "OPP-...", que no tienen detalle impositivo), va
+// entero a "RI (No Gravado)". Solo se splitea RI - el resto de los tipos de
+// contribuyente quedan como están.
 const MONEDA_VACIA = 'En Blanco';
 const CUENTAS_CONTRAPARTIDA = ['211101-01-000', '223202-01-000'];
 const ACCATNUM_IMPUESTOS = 9;
 const MAX_ROWS = 100000;
+const TAXDTLID_GRAVADO = ['IVACF 10.5%', 'IVACF 21%', 'IVACF 27%'];
+const TAXDTLID_NO_GRAVADO = ['IVACF 0% NOGRAV', 'IVACF 0% EXE'];
 
 const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta }) => {
   if (!fechaDesde || !fechaHasta) {
@@ -83,7 +89,8 @@ const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta }) =
     SELECT TOP (${MAX_ROWS})
       NULLIF(LTRIM(RTRIM(A.USERDEF2)), '') AS Categoria,
       NULLIF(LTRIM(RTRIM(CT.RESPBLE)), '') AS TipoContribuyente,
-      TI.TotalTax,
+      TI.BaseGravado,
+      TI.BaseNoGravado,
       LTRIM(RTRIM(G.ORDOCNUM)) AS Comprobante,
       LTRIM(RTRIM(N.ACTNUMST)) AS Cuenta,
       LTRIM(RTRIM(A.ACTDESCR)) AS CuentaDescripcion,
@@ -97,7 +104,10 @@ const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta }) =
     LEFT JOIN PM30200 AS HH ON LTRIM(RTRIM(HH.DOCNUMBR)) = LTRIM(RTRIM(G.ORDOCNUM)) AND LTRIM(RTRIM(HH.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
     LEFT JOIN PM20000 AS HO ON LTRIM(RTRIM(HO.DOCNUMBR)) = LTRIM(RTRIM(G.ORDOCNUM)) AND LTRIM(RTRIM(HO.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
     LEFT JOIN (
-      SELECT LTRIM(RTRIM(VCHRNMBR)) AS VCHRNMBR, SUM(ABS(TAXAMNT)) AS TotalTax
+      SELECT
+        LTRIM(RTRIM(VCHRNMBR)) AS VCHRNMBR,
+        SUM(CASE WHEN LTRIM(RTRIM(TAXDTLID)) IN ('${TAXDTLID_GRAVADO.join("','")}') THEN TAXDTAMT ELSE 0 END) AS BaseGravado,
+        SUM(CASE WHEN LTRIM(RTRIM(TAXDTLID)) IN ('${TAXDTLID_NO_GRAVADO.join("','")}') THEN TAXDTAMT ELSE 0 END) AS BaseNoGravado
       FROM AWLI_IMPUESTOS
       GROUP BY LTRIM(RTRIM(VCHRNMBR))
     ) AS TI ON TI.VCHRNMBR = LTRIM(RTRIM(COALESCE(HH.VCHRNMBR, HO.VCHRNMBR)))
@@ -111,19 +121,32 @@ const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta }) =
     ORDER BY Categoria ASC
   `);
 
-  const base = detalle.recordset.map((row) => {
-    let tipoContribuyente = row.TipoContribuyente || MONEDA_VACIA;
-    if (tipoContribuyente === 'RI') {
-      tipoContribuyente = row.TotalTax ? 'RI (Gravado)' : 'RI (No Gravado)';
-    }
-    return {
-      Categoria: row.Categoria || MONEDA_VACIA,
-      TipoContribuyente: tipoContribuyente,
+  const base = detalle.recordset.flatMap((row) => {
+    const categoria = row.Categoria || MONEDA_VACIA;
+    const tipoContribuyente = row.TipoContribuyente || MONEDA_VACIA;
+    const monto = (row.DEBITAMT || 0) - (row.CRDTAMNT || 0);
+    const comun = {
+      Categoria: categoria,
       Comprobante: row.Comprobante,
       Cuenta: row.Cuenta,
       CuentaDescripcion: row.CuentaDescripcion,
-      Monto: (row.DEBITAMT || 0) - (row.CRDTAMNT || 0),
     };
+
+    if (tipoContribuyente !== 'RI') {
+      return [{ ...comun, TipoContribuyente: tipoContribuyente, Monto: monto }];
+    }
+
+    const baseGravado = row.BaseGravado || 0;
+    const baseNoGravado = row.BaseNoGravado || 0;
+    const totalBase = baseGravado + baseNoGravado;
+    const ratioGravado = totalBase ? baseGravado / totalBase : 0;
+    const montoGravado = monto * ratioGravado;
+    const montoNoGravado = monto - montoGravado;
+
+    const partes = [];
+    if (ratioGravado > 0) partes.push({ ...comun, TipoContribuyente: 'RI (Gravado)', Monto: montoGravado });
+    if (ratioGravado < 1) partes.push({ ...comun, TipoContribuyente: 'RI (No Gravado)', Monto: montoNoGravado });
+    return partes;
   });
 
   const agrupado = new Map();
