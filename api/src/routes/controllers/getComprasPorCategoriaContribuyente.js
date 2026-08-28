@@ -16,11 +16,16 @@ const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
 //
 // RI (Gravado) vs RI (No Gravado): dentro de "RI" hay comprobantes sin IVA discriminado
 // (ej. órdenes de pago "OPP-...", confirmado contra PRD08 con proveedores RESP_TYPE=01
-// y TAXAMNT=0 en julio/2026) que no deberían mezclarse con las facturas normales con
-// IVA. Se distingue por PM30200.TAXAMNT (o PM20000.TAXAMNT si el comprobante sigue
-// abierto) del comprobante: si es distinto de 0, "RI (Gravado)"; si es 0 o no se
-// encuentra el comprobante en ninguna de las dos tablas, "RI (No Gravado)". Solo se
-// splitea RI - el resto de los tipos de contribuyente quedan como están.
+// y sin impuesto en julio/2026) que no deberían mezclarse con las facturas normales con
+// IVA. Se distingue por el detalle impositivo real del comprobante (AWLI_IMPUESTOS,
+// una fila por TAXDTLID aplicado al voucher - "IVACF 21%", "IVACF 0% NOGRAV", etc.),
+// no por PM30200/PM20000.TAXAMNT del header: se busca el VCHRNMBR del comprobante en
+// PM30200/PM20000 y se suma el impuesto de todas sus líneas en AWLI_IMPUESTOS. Si algún
+// TAXDTLID tiene importe de impuesto ≠ 0, es "RI (Gravado)"; si no, "RI (No Gravado)".
+// Solo se splitea RI - el resto de los tipos de contribuyente quedan como están.
+// OJO: un comprobante puede dar Monto negativo (una NC) y aun así clasificar
+// correctamente como No Gravado si su propio detalle impositivo es "0% NOGRAV" - eso
+// no es un bug de esta query, es el dato real cargado en GP para ese comprobante.
 const MONEDA_VACIA = 'En Blanco';
 const CUENTAS_CONTRAPARTIDA = ['211101-01-000', '223202-01-000'];
 const ACCATNUM_IMPUESTOS = 9;
@@ -78,7 +83,7 @@ const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta }) =
     SELECT TOP (${MAX_ROWS})
       NULLIF(LTRIM(RTRIM(A.USERDEF2)), '') AS Categoria,
       NULLIF(LTRIM(RTRIM(CT.RESPBLE)), '') AS TipoContribuyente,
-      COALESCE(HH.TAXAMNT, HO.TAXAMNT) AS TaxAmt,
+      TI.TotalTax,
       LTRIM(RTRIM(G.ORDOCNUM)) AS Comprobante,
       LTRIM(RTRIM(N.ACTNUMST)) AS Cuenta,
       LTRIM(RTRIM(A.ACTDESCR)) AS CuentaDescripcion,
@@ -91,6 +96,11 @@ const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta }) =
     LEFT JOIN DYNAMICS..AWLI40330 AS CT ON CT.RESP_TYPE = PT.RESP_TYPE
     LEFT JOIN PM30200 AS HH ON LTRIM(RTRIM(HH.DOCNUMBR)) = LTRIM(RTRIM(G.ORDOCNUM)) AND LTRIM(RTRIM(HH.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
     LEFT JOIN PM20000 AS HO ON LTRIM(RTRIM(HO.DOCNUMBR)) = LTRIM(RTRIM(G.ORDOCNUM)) AND LTRIM(RTRIM(HO.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
+    LEFT JOIN (
+      SELECT LTRIM(RTRIM(VCHRNMBR)) AS VCHRNMBR, SUM(ABS(TAXAMNT)) AS TotalTax
+      FROM AWLI_IMPUESTOS
+      GROUP BY LTRIM(RTRIM(VCHRNMBR))
+    ) AS TI ON TI.VCHRNMBR = LTRIM(RTRIM(COALESCE(HH.VCHRNMBR, HO.VCHRNMBR)))
     WHERE
       LTRIM(RTRIM(G.SOURCDOC)) IN ('PMTRX', 'PMVVR')
       AND G.TRXDATE >= @fechaDesde
@@ -104,7 +114,7 @@ const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta }) =
   const base = detalle.recordset.map((row) => {
     let tipoContribuyente = row.TipoContribuyente || MONEDA_VACIA;
     if (tipoContribuyente === 'RI') {
-      tipoContribuyente = row.TaxAmt ? 'RI (Gravado)' : 'RI (No Gravado)';
+      tipoContribuyente = row.TotalTax ? 'RI (Gravado)' : 'RI (No Gravado)';
     }
     return {
       Categoria: row.Categoria || MONEDA_VACIA,
