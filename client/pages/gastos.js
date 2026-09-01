@@ -2,6 +2,7 @@ import { useState } from "react";
 import ResultTable from "@/components/ResultTable";
 
 export default function Gastos() {
+  const [empresa, setEmpresa] = useState("ecobahia");
   const [cuentaDesde, setCuentaDesde] = useState("");
   const [cuentaHasta, setCuentaHasta] = useState("");
   const [fechaDesde, setFechaDesde] = useState("");
@@ -16,6 +17,7 @@ export default function Gastos() {
     setError("");
     try {
       const params = new URLSearchParams();
+      params.set("empresa", empresa);
       params.set("cuentaDesde", cuentaDesde);
       params.set("cuentaHasta", cuentaHasta);
       if (fechaDesde) params.set("fechaDesde", fechaDesde);
@@ -37,6 +39,13 @@ export default function Gastos() {
       <h1 className="text-xl font-semibold mb-4">Gastos (GL) — GL20000 / GL00100</h1>
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
+        <div>
+          <label className="block text-sm mb-1">Empresa</label>
+          <select value={empresa} onChange={(e) => setEmpresa(e.target.value)} className="border border-[var(--color-border)] rounded px-2 py-1">
+            <option value="ecobahia">Ecobahia</option>
+            <option value="sist2">Sist2 (172.19.31.47)</option>
+          </select>
+        </div>
         <div>
           <label className="block text-sm mb-1">Cuenta desde (ACTNUMST)</label>
           <input required value={cuentaDesde} onChange={(e) => setCuentaDesde(e.target.value)} className="border border-[var(--color-border)] rounded px-2 py-1" />
@@ -71,7 +80,7 @@ export default function Gastos() {
           <p className="text-sm text-gray-600 mb-2">Total de movimientos encontrados: {data.totalCount}</p>
           <ResultTable title="Financiero (SOURCDOC = DG, asiento contable manual)" rows={data.financiero.rows} columns={data.financiero.columns} filename="gastos-financiero" />
           <ResultTable title="Compras (SOURCDOC = PMTRX/PMVPY/PMVVR, debería cerrar contra IVA Compras)" rows={data.compras.rows} columns={data.compras.columns} filename="gastos-compras" />
-          <ResultTable title="Pagos con OPV en ORCTRNUM (órdenes de pago varias)" rows={data.pagosOPV.rows} columns={data.pagosOPV.columns} filename="gastos-pagos-opv" />
+          <ResultTable title="Pagos con OPV o EGRE en ORCTRNUM (órdenes de pago varias, sin proveedor)" rows={data.pagosOPV.rows} columns={data.pagosOPV.columns} filename="gastos-pagos-opv" />
           <ResultTable title="Otro (sin clasificar)" rows={data.otro.rows} columns={data.otro.columns} filename="gastos-otro" />
         </>
       )}

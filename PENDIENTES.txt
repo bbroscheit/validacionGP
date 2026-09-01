@@ -1,0 +1,352 @@
+VALIDACION GP - registro de lo hecho y lo pendiente
+=====================================================
+(bitácora del proyecto - se va actualizando a medida que avanzamos, no es un changelog
+técnico línea por línea, para eso está el historial de git)
+
+
+HECHO
+-----
+
+- Repo subido a GitHub: https://github.com/bbroscheit/validacionGP (api + client).
+  .env NO se sube (tiene credenciales reales) - hay que crearlo a mano en cada servidor
+  nuevo. Ver api/.env y client/.env como referencia de qué variables necesita cada uno.
+
+- Fix: "Ventas por categoría y contribuyente" y "Compras por categoría y contribuyente"
+  usaban AWLI_RM00101.RESP_TYPE / AWLI_PM00200.RESP_TYPE para clasificar RI/MO/CF/EX,
+  pero ese campo viene "colapsado" (MO queda cargado como RI porque hace años la
+  facturación era igual para ambos). Se resolvió cruzando contra II_DATOS_CLIE.codigo
+  (ventas) - el mismo dato pero sin el colapso. Ver AGENTS/NOTES.md de la api para el
+  detalle técnico completo.
+
+- Fix: dentro de "RI" en Compras por categoría y contribuyente, un mismo comprobante
+  puede tener un tramo gravado y otro no gravado (ej. un impuesto exento mezclado con
+  el resto). Se agregó el prorrateo real usando el detalle impositivo de AWLI_IMPUESTOS
+  en vez de clasificar el comprobante entero a un solo lado.
+
+- Descubrimiento importante: AWLI_IMPUESTOS es la tabla con el detalle impositivo real
+  de cada comprobante (gravado por tasa, exento, no gravado, percepciones IIBB/IVA).
+  Documentado en detalle en api/NOTES.md, incluyendo la trampa de TAXDTAMT vs TDTTXAMT
+  (hay que usar TDTTXAMT, es el que realmente cierra contra el total del comprobante).
+
+- Feature: "Libro IVA Digital (ARCA)" - nuevo link en el desplegable "Bases".
+  - Resumen Neto/Impuestos/Total de Ventas y Compras para un rango de fechas.
+  - Botón que genera y descarga los 4 archivos .txt que pide ARCA (R.G. 4597):
+    VENTAS_CBTE, VENTAS_ALICUOTAS, COMPRAS_CBTE, COMPRAS_ALICUOTAS.
+  - Se armó a partir del instructivo oficial de ARCA (tablas de códigos + descripción
+    de campos) y se validó contra datos reales de julio/2026 (1333 comprobantes de
+    ventas, 307 de compras) - reconciliación exacta contra los totales de GP.
+  - Código: api/src/services/arcaCodes.js, fixedWidth.js, libroIvaDigitalData.js,
+    libroIvaDigitalTxt.js + los controllers/rutas correspondientes.
+  - TODAVÍA NO SE COMMITEÓ - el usuario pidió esperar a probar los .txt generados
+    antes de subirlo (ver PENDIENTE más abajo).
+
+
+PENDIENTE
+---------
+
+- [ALTA] Probar los 4 .txt del Libro IVA Digital contra el importador real de ARCA
+  antes de hacer commit/usarlos en una presentación de verdad. Los anchos de los
+  campos alfanuméricos (número de identificación, denominación, etc.) se adoptaron
+  por convención porque el instructivo oficial (revisión 30/07/2025) no detalla el
+  ancho exacto en bytes de esos campos - hay que confirmar que ARCA no los rechace.
+
+- [MEDIA] El cliente en el servidor (puerto 3000) corre en modo producción
+  (`next start`), no en dev - no va a mostrar nada nuevo (ni el link de Libro IVA
+  Digital) hasta hacer `npm run build` en client/ y reiniciar ese proceso.
+
+- [MEDIA] Revisar si getCompras.js / getComprasPorCategoriaContribuyente.js tienen el
+  mismo problema de clasificación "colapsada" que tuvimos en ventas, pero del lado de
+  proveedores (AWLI_PM00200.RESP_TYPE en vez de AWLI_RM00101.RESP_TYPE). No se llegó
+  a confirmar si existe un II_DATOS_CLIE equivalente para proveedores.
+
+- Segunda base GP ("sist2", servidor 172.19.31.47, empresa "sist2 ecobahia", base
+  PRD08 - confirmado por el usuario que es la correcta pese a compartir nombre con la
+  de Ecobahia, son servidores/datos distintos):
+  - Conexión armada: api/src/config/gpConfig.js (`gpConfigSist2`, con `encrypt:
+    false` - con `true` tira error de TLS, versión de protocolo vieja en ese SQL
+    Server) y gpPool.js (`getGpPoolSist2`). Variables en api/.env: GP2_USER,
+    GP2_PASSWORD, GP2_SERVER, GP2_DATABASE_SIST2.
+  - `getVentas` y `getGastos` ahora aceptan `empresa: 'ecobahia' | 'sist2'` (default
+    'ecobahia') y usan el pool correspondiente. Pasa por querystring `?empresa=sist2`
+    en /ventas y /gastos.
+  - Confirmado por qué el usuario pidió Gastos en vez de Compras para esta empresa: no
+    cargan proveedores, todo sale como "OPV" (orden de pago varia) - confirmado el
+    patrón real en GL20000.ORCTRNUM (ej. "OPV-00000018"), que getGastos.js YA sabía
+    manejar (agrupa `pagosOPV` aparte).
+  - OJO importante para Ventas en sist2 (confirmado contra datos reales de agosto/2026):
+    - `soloConP` (checkbox "solo comprobantes fiscales", default tildado): en sist2
+      casi todas las ventas (357 de 362 en agosto) usan un esquema de comprobante
+      propio por sucursal (ej. "BB0000026", DOCID="BAHIABLANCA") SIN la "P" de
+      comprobante fiscal electrónico - solo un puñado usa el formato "FV A0040-...".
+      Con el checkbox tildado el reporte devuelve casi vacío para esta empresa - HAY
+      QUE DESTILDARLO al usar Ventas con sist2.
+    - El filtro de "sucursal" (LOCNCODE) no sirve para sist2: viene siempre
+      "PRINCIPAL". La sucursal real está codificada en el DOCID (nombre de ciudad:
+      BAHIABLANCA, TANDIL, LAPAMPA, PUERTOMADRYN, MARDELPLATA, CASACENTRAL).
+  - Selector de "Empresa" agregado en pages/ventas.js y pages/gastos.js (dropdown
+    Ecobahia/Sist2, default Ecobahia). En Ventas, al elegir Sist2 se destilda solo
+    "soloConP" (si no, el reporte devuelve casi vacío - ver arriba) y se deshabilita
+    el campo de sucursal (no aplica).
+  - Dos problemas de esquema encontrados y resueltos al probar contra datos reales:
+    - `getVentas` colgaba (>30s, timeout) con empresa=sist2 porque el join a
+      `II_DATOS_CLIE` (el fix de RI/MO de Ecobahia) usa una vista que en el servidor
+      de sist2 apunta a un linked server (CRM) propio, no alcanzable desde acá -
+      se queda esperando indefinidamente. Solución: el join a II_DATOS_CLIE ahora es
+      solo para empresa='ecobahia'; para el resto se usa el camino viejo
+      (AWLI_RM00101.RESP_TYPE, con el problema conocido de RI/MO colapsados - un fix
+      posterior si hace falta separarlos para sist2 también).
+    - `getGastos` tiraba error de columna inválida con empresa=sist2: la tabla
+      AATransactions (Contabilidad Analítica, de donde sale Zona/Centro de Costo) en
+      ese servidor NO tiene las mismas columnas ("Dimensión de trans." no existe ahí -
+      es una Contabilidad Analítica configurada distinto). Solución: ese join solo se
+      arma para empresa='ecobahia'; para el resto, Zona/Centro quedan en blanco.
+  - Probado end-to-end contra datos reales de sist2 (julio-agosto/2026): getVentas
+    (362 comprobantes agosto, ~1.4s) y getGastos (1121 movimientos agosto, ~2.7s,
+    incluyendo el caso pagosOPV con datos reales de julio) - ambos funcionando.
+  - PENDIENTE (más adelante, no pedido todavía): reportes de ventas/compras por
+    categoría-contribuyente, por sucursal, etc. para sist2 - no se armaron, y el de
+    sucursal en particular no va a andar bien tal cual porque LOCNCODE no sirve acá
+    (ver arriba). Tampoco se separó RI/MO para sist2 (ver punto de II_DATOS_CLIE
+    arriba). El usuario solo pidió, por ahora, las bases de Ventas y Gastos.
+
+- Fix (solo empresa=sist2): a partir del 03/07/2026 sist2 cambió la numeración de
+  comprobantes y perdió los prefijos "FV"/"NC" - un comprobante como "BB0000026" no
+  dice si es factura o nota de crédito por el número solo. Esto rompía DOS cosas:
+  - El reporte de GP ("IVA Ventas") tiene una columna "Tipo de Venta" que nuestra
+    base de Ventas no tenía - agregada ahora como columna `TipoVenta`, sacada de
+    AWLI_DOCUMENTOS.DOCTYPEDESC (la misma tabla que usa el reporte nativo de GP;
+    valores reales vistos: "FACTURA", "DEVOLUC" -nota de crédito/devolución-,
+    "N.DEBIT", "N.CREDI" -esta última en desuso desde jun/2026, reemplazada por
+    "DEVOLUC"). Tiene filas duplicadas por comprobante (estado OPEN y WORK con el
+    mismo dato) - se agrupa con MIN() al hacer el join para no duplicar filas.
+  - MÁS IMPORTANTE: getVentas.js decidía el signo de los importes (NETO, TAXAMNT,
+    DOCAMNT, etc. - GP los guarda siempre en positivo) mirando si el comprobante
+    empezaba con "NC". Para sist2 después del 03/07 esto ya NO detectaba las notas de
+    crédito → quedaban sumando en vez de restar en cualquier totalización manual del
+    Excel. Corregido: para empresa=sist2 el signo ahora se decide por TipoVenta
+    ("DEVOLUC"/"N.CREDI" = negativo) en vez del prefijo del número. Ecobahia sigue
+    exactamente igual que antes (prefijo "NC", sin columna TipoVenta) - pedido
+    explícito del usuario de no tocar el reporte de sistema 1.
+  - Verificado contra datos reales de agosto/2026 en sist2: 362 comprobantes, 13
+    DEVOLUC, todos con el signo correcto (el único caso "distinto" fue un DEVOLUC de
+    $0 que da -0 en vez de 0, sin efecto real).
+  - Mismo código: api/src/routes/controllers/getVentas.js.
+
+- Corrección sobre el fix anterior: usar TipoVenta (AWLI_DOCUMENTOS) para decidir el
+  signo en sist2 estaba MAL - esa tabla tiene errores de carga puntuales (confirmado:
+  3 facturas del 03/07/2026, justo el día del cambio de numeración, quedaron
+  cargadas ahí como "DEVOLUC" pese a ser facturas de verdad) y hacía que facturas
+  reales salieran en negativo. Se cambió el criterio de signo (SOLO el signo, la
+  columna TipoVenta se sigue mostrando igual) para que use H.SOPTYPE, el campo NATIVO
+  de SOP30200 que GP usa para toda su contabilización interna: en sist2 solo existen
+  los valores 3 (Factura, incluye Notas de Débito - no hay SOPTYPE aparte para ND) y
+  4 (Devolución/Nota de Crédito). esNotaCredito para sist2 ahora es `SOPTYPE === 4`.
+  Verificado: 0 facturas en negativo en jun-ago/2026 (1003 comprobantes). Los 3 casos
+  con el error de carga de origen ahora tienen el importe correcto (positivo) aunque
+  la columna TipoVenta les siga mostrando "DEVOLUC" (dato mal cargado en GP mismo -
+  el reporte nativo "IVA Ventas" de GP tendría la misma etiqueta mal puesta ahí, no es
+  algo que podamos corregir desde acá sin tocar el dato de origen).
+  Ecobahia sigue sin tocarse (sigue usando el prefijo NC del SOPNUMBE).
+
+- Sucursal para sist2 (columna nueva en la base de Ventas y en los 3 reportes nuevos de
+  abajo): se resuelve con 3 fuentes, en este orden (ninguna sola alcanza el 100%):
+    1) H.PHONE3 (mismo campo que usa Ecobahia, pero en sist2 casi siempre viene vacío).
+    2) H.DOCID: para comprobantes con la nomenclatura nueva trae el nombre de ciudad
+       directo (BAHIABLANCA, TANDIL, LAPAMPA, MARDELPLATA, PUERTOMADRYN, CASACENTRAL).
+    3) RM00101.USERDEF2 ("Def. de usuario 2" en la ficha del cliente) - cubre lo que
+       queda. Tiene un typo real en la data ("Mar de Plata" en vez de "Mar del Plata"),
+       contemplado en el mapeo.
+  Con las 3 juntas se resuelven el 100% de los comprobantes de jun-ago/2026 (1003/1003).
+  OJO: el código "LP" que dio el usuario para la sucursal es LA PAMPA, no La Plata (el
+  usuario lo escribió como "la plata" pero el dato real en GP es "LAPAMPA"/"LA PAMPA").
+  Centralizado en api/src/services/sist2Ventas.js (resolverSucursalSist2,
+  esNotaCreditoSist2) para no duplicar la lógica en cada controller.
+
+- Feature: reportes de Ventas por sucursal, Ventas por sucursal y cuenta, y Asiento de
+  ventas para sist2 - mismos reportes que ya existían para Ecobahia, en un desplegable
+  nuevo del Nav ("Ventas Sist2") a pedido del usuario, separado del desplegable "Ventas"
+  de Ecobahia.
+  - Controllers existentes (getVentasPorSucursal.js, getVentasPorSucursalCuenta.js,
+    getAsientoVentas.js, getSucursalesVentas.js) extendidos con parámetro `empresa`,
+    mismo patrón que getVentas.js/getGastos.js - Ecobahia sigue exactamente igual
+    (verificado: mismos totales antes/después del cambio).
+  - Confirmado que sist2 usa el MISMO plan de cuentas que Ecobahia (mismo código
+    "113110-01-000 DEUDORES POR VENTAS LOCALES") y el mismo SOURCDOC='SJ' para asientos
+    de ventas en GL20000 - no hubo que adaptar esa parte.
+  - BUG IMPORTANTE encontrado y corregido: en sist2, desde el cambio de numeración, un
+    mismo número de comprobante (ej. "PM00000002") puede pertenecer a DOS documentos
+    reales distintos (una Factura y una Devolución con la serie pisada entre sí - en
+    Ecobahia esto nunca pasa porque el prefijo FV/NC ya viene incluido en el propio
+    SOPNUMBE). El JOIN de GL20000 contra SOP30200 por número de comprobante solamente
+    hacía "fan-out": cada línea contable se duplicaba contra los dos documentos,
+    DUPLICANDO el monto reportado (confirmado en datos reales de julio/2026: Puerto
+    Madryn salía pagado el doble). Se encontró que GL20000.ORTRXTYP reproduce el
+    SOPTYPE real de cada asiento - se agregó `AND H.SOPTYPE = G.ORTRXTYP` al join,
+    solo para empresa=sist2, en getVentasPorSucursalCuenta.js y getAsientoVentas.js.
+  - Verificado tras el fix: Ecobahia sigue exactamente igual (Debe=Haber, mismos
+    totales). Sist2 julio/2026: Debe=Haber cierra exacto (consolidado y por sucursal,
+    ej. Puerto Madryn $6.325.350 = $6.325.350). "Ventas por sucursal" (basado en
+    SOP30200) y "Ventas por sucursal y cuenta" (basado en GL20000) reconcilian casi
+    exacto ($8.178.206,33 vs $8.187.606,33) - la diferencia de $9.400 restante es UN
+    comprobante (NC A0040-00000013) con VOIDSTTS=1 (anulado en GP): sigue sumando en el
+    reporte basado en SOP30200 porque nada filtra documentos anulados ahí, pero
+    lógicamente no genera asiento contable (0 líneas en GL20000) por eso no aparece en
+    el reporte basado en GL.
+    RESUELTO a pedido del usuario: se agregó `AND ISNULL(H.VOIDSTTS, 0) = 0` a las
+    queries que leen SOP30200 directo (getVentas.js: cabecera/líneas/count;
+    getVentasPorSucursal.js: detalle/count) - afecta a las dos empresas por igual, no
+    solo sist2 (libroIvaDigitalData.js ya lo tenía desde que se armó el Libro IVA
+    Digital). Los reportes basados en GL20000 (ventas-por-sucursal-cuenta,
+    asiento-ventas, ventas-categoria-contribuyente) no necesitaron el cambio: un
+    comprobante anulado no genera asiento contable, así que ya quedaban afuera solos.
+    Verificado: sist2 julio/2026 ahora reconcilia EXACTO entre "Ventas por sucursal" y
+    "Ventas por sucursal y cuenta" ($8.187.606,33 = $8.187.606,33, ya no hay diferencia
+    de $9.400). Ecobahia julio/2026 no tenía comprobantes anulados en la muestra
+    probada - mismo total de filas antes/después (1333).
+  - Frontend: 3 páginas nuevas en client/pages/reportes/sist2/ (ventas-por-sucursal.js,
+    ventas-por-sucursal-cuenta.js, asiento-ventas.js), fijas a empresa=sist2 (sin
+    selector, es un desplegable aparte) y con "soloConP" en false por defecto (igual
+    que en la página base de Ventas). Nav.js: nuevo desplegable "Ventas Sist2".
+  - `npx next build` corrido en client/ para confirmar que compila sin errores - OK,
+    las 3 páginas nuevas aparecen en el build.
+
+- Feature: selector de Empresa (Ecobahia/Sist2) agregado a las 4 sub-páginas de Gastos
+  que antes solo consultaban Ecobahia: gastos/recibos.js, gastos/pagos.js,
+  gastos/compras.js, gastos/detalle-ventas.js. getGastos.js (el controller de todas)
+  YA soportaba `empresa` desde el trabajo anterior de conexión a sist2 - no hizo falta
+  tocar el backend, solo faltaba el selector en el frontend de estas 4 páginas (la
+  página base gastos.js ya lo tenía).
+  Motivo puntual: el usuario va a necesitar los Recibos de sist2 (SOURCDOC IN ('CRJ',
+  'RMJ')) para armar cuentas corrientes de clientes más adelante. Verificado que la
+  data está completa para eso: julio/2026 tiene 505 CRJ + 6 RMJ, el 100% con cliente
+  identificado en GL20000.ORMSTRID (sin filas en blanco).
+  PENDIENTE (no pedido todavía): armar el reporte de "cuentas corrientes" en sí -
+  todavía no se diseñó, solo se dejó la base de Recibos accesible para sist2.
+
+- Fix: en sist2, los pagos sin proveedor cargado (PMPAY sin factura de por medio) no
+  solo usan "OPV" en ORCTRNUM como Ecobahia - también usan "EGRE" (Egresos), y de hecho
+  es MÁS común que "OPV" ahí (60 EGRE contra 32 OPV en jun-jul/2026, entre las dos
+  cubren el 100% de esos pagos). Ecobahia no usa "EGRE" (confirmado 0 casos). Se agregó
+  "EGRE" al filtro de pagosOPV en getGastos.js (ahora busca "OPV" O "EGRE" en
+  ORCTRNUM) - no afecta a Ecobahia (sigue dando 0 igual que antes). Título del cuadro
+  en gastos.js actualizado para reflejar los dos patrones.
+
+- Fix: pagosOPV (OPV+EGRE) traia mezcladas las lineas de contrapartida en efectivo
+  (cada pago tiene una linea en la cuenta de gasto y otra en la cuenta de caja/fondo
+  fijo de donde salio la plata) y alguna otra categoria suelta sin relacion con gastos.
+  A pedido del usuario, ahora se queda solo con ACCATNUM 16 y 17 (categorias de gasto
+  reales, confirmado contra PRD08 en las dos empresas) y descarta 20/21 (FONDO
+  FIJO/CAJA - efectivo) y cualquier otra categoria (7/22/24/29/30 vistas sueltas en
+  Ecobahia). Mismo filtro para las dos empresas - no es un tema sist2-especifico, el
+  mismo problema existia en Ecobahia sin que se hubiera notado hasta ahora. Verificado:
+  sist2 jun-jul/2026 baja de 66 a 20 filas (solo 16/17); Ecobahia (historico completo)
+  baja a 4 filas (todas categoria 16, 0 en categoria 17 - no hay casos ahi).
+  Mismo codigo: api/src/routes/controllers/getGastos.js.
+
+- Feature: "Cobranzas por sucursal" (sist2) - nuevo link dentro del desplegable "Ventas
+  Sist2". Agrupa los recibos del periodo (GL20000, SOURCDOC IN ('CRJ','RMJ'), misma
+  clasificacion que ya usaba Gastos) por sucursal.
+  - Los recibos no tienen sucursal propia en GP. Se resuelve en dos niveles, a pedido
+    del usuario:
+    1) La sucursal de la FACTURA a la que el recibo esta aplicado (tabla RM20201,
+       "Aplicado a" - en esta instalacion de GP las aplicaciones quedan siempre en la
+       tabla de "abiertas", RM30201/historial de aplicaciones da 0 filas siempre,
+       confirmado). La sucursal de esa factura se resuelve con el mismo metodo de
+       siempre (PHONE3 -> DOCID -> ficha del cliente DE LA FACTURA, ver
+       services/sist2Ventas.js). Un recibo puede estar aplicado a varias facturas
+       (pago parcial/agrupado) - cada aplicacion prorratea su propio monto
+       (RM20201.APPTOAMT).
+    2) Si no hay factura que resuelva (recibo sin aplicar, factura no encontrada en
+       SOP30200, o esa factura tampoco resuelve sucursal) - la ficha del cliente DEL
+       RECIBO (quien pago) directamente. Si tampoco hay ahi, "En Blanco" (a pedido
+       del usuario, para completar mas adelante).
+  - El monto real de cada recibo sale de su linea contra la cuenta de deudores por
+    ventas (113110-01-000, la misma que ya usan los reportes de Ventas) dentro de
+    GL20000 - no de RM20201 directamente, porque las aplicaciones ahi pueden incluir
+    descuentos por pronto pago que no siempre sirven 1:1 contra el monto real cobrado
+    (confirmado: sumar RM20201.APPTOAMT de julio/2026 da $33.057.844,66 contra
+    $32.776.590,00 de la linea de deudores - una diferencia de casi $300.000 solo por
+    ese efecto).
+  - Por construccion, para cada recibo: MontoDocumento + MontoCliente = el monto total
+    del recibo (cualquier diferencia entre lo aplicado y lo resuelto cae integra en
+    MontoCliente) - asi el total general SIEMPRE cierra exacto contra la suma real de
+    recibos del periodo. Verificado julio/2026: totalGeneral = $32.776.590,00, exacto
+    contra el total de recibos calculado directo de GL20000 (mismo numero).
+  - Filtra RM20201 por APTODCTY = 1 (aplicado a Factura - el unico tipo visto en la
+    data real) y SOP30200.SOPTYPE = 3 al buscar la factura - evita a proposito el
+    problema ya conocido de numeros de comprobante repetidos entre Factura/Devolucion
+    en sist2 (ver el fix de getVentasPorSucursalCuenta.js).
+  - OJO / caso real encontrado: un recibo puede aparecer con MontoCliente NEGATIVO en
+    el reporte (visto en Casa Central, julio/2026: -$2.036.000) - pasa cuando un
+    recibo se anula via RMJ (reversa) dentro del periodo consultado pero el recibo
+    original (CRJ) se habia posteado en un periodo ANTERIOR (fuera del rango) - dentro
+    del mes solo se ve la reversa. Es una caracteristica normal de cualquier reporte
+    mensual basado en GL (ya le pasaria igual al Recibos comun sin este cambio), no
+    algo que haya que arreglar.
+  - Codigo: api/src/routes/controllers/getCobranzasSist2.js,
+    client/pages/reportes/sist2/cobranzas.js.
+
+- Feature: "Cuenta corriente de cliente" (sist2) - nuevo link dentro del desplegable
+  "Ventas Sist2". Busca un cliente (por codigo o nombre) y muestra su historial
+  cronologico completo con saldo corrido: Fecha, Tipo, Documento, Debe, Haber, Saldo,
+  mas un saldo inicial que suma TODO lo anterior a la fecha "desde" elegida (no solo lo
+  que cae en el rango filtrado), para que el saldo mostrado sea el saldo real del
+  cliente en ese momento, no solo el neto del periodo.
+  - Fuente: RM20101 (subdiario de Clientes de GP) - UNA fila por cada movimiento real
+    (factura, devolucion/NC, recibo, cargo financiero). Confirmado que las tablas de
+    "historial" de GP (RM30101/RM30201) dan 0 filas siempre en esta instalacion (nunca
+    se corrio el proceso de "quitar historial") - RM20101 sola ya tiene el 100% del
+    historial, sin que haga falta unir con nada mas.
+  - RMDTYPAL (codigo de tipo de documento) define el signo: 1/2/3/4/5 aumentan la
+    deuda (Debe), 6/7/8/9 la disminuyen (Haber). Visto en datos reales de sist2: 1=
+    Factura, 3=Cargo financiero, 7=Devolucion (formato viejo), 8=Devolucion (formato
+    nuevo post-03/07, propio de esta instalacion), 9=Recibo. Los codigos 2/4/5/6 no
+    aparecen todavia en los datos pero se dejaron mapeados por si aparecen.
+  - Verificado el caso de los comprobantes con numero repetido entre Factura/Devolucion
+    (PM00000001/2/3, ver getVentasPorSucursalCuenta.js): en RM20101 cada uno tiene UNA
+    sola fila con el RMDTYPAL correcto (1 o 8 segun corresponda) - el "cruce contra
+    SOP30200.SOPTYPE" que hice al investigar daba resultados contradictorios, pero era
+    un artefacto de JOIN sin desambiguar (la misma clase de bug que ya se conocia), no
+    un problema real de RM20101. Confirmado con el cliente 19837: su devolucion
+    PM00000001 aparece bien clasificada, saldo cierra en $0 al final del periodo.
+  - OJO importante (documentado en el codigo): NO cruzar el total de RM20101 contra
+    GL20000 esperando que cierre - GL20000 en esta instalacion solo tiene detalle desde
+    el 02/06/2026 en adelante (~3 meses), mientras que RM20101 tiene movimientos reales
+    desde febrero/2026. Es normal en GP que el subdiario de Clientes retenga el
+    historial completo aunque el mayor contable tenga una ventana mas corta - no es un
+    error de datos, confirmado revisando fechas minimas/maximas de ambas tablas.
+  - Selector de cliente: input de busqueda con autocompletado (por codigo o nombre,
+    debounced) contra un endpoint nuevo (/reportes/sist2/clientes) que busca en
+    RM00101.
+  - Codigo: api/src/routes/controllers/getCuentaCorrienteSist2.js,
+    api/src/routes/controllers/getClientesSist2.js,
+    client/pages/reportes/sist2/cuenta-corriente.js.
+
+- Fix/ajuste a "Cuenta corriente de cliente" (sist2): si se deja el campo Cliente en
+  blanco, ahora trae un LISTADO de todos los clientes con movimientos (Saldo Inicial,
+  Movimiento del Periodo, Cantidad de Movimientos, Saldo Final), ordenado de mayor a
+  menor saldo - antes tiraba error pidiendo elegir un cliente. Se puede hacer clic en
+  cualquier fila para entrar al detalle cronologico de ese cliente (mismo endpoint, el
+  backend devuelve un campo `modo: 'listado'|'detalle'` para que el frontend sepa que
+  tabla mostrar). Verificado: 284 clientes con movimientos hasta agosto/2026.
+  El calculo del listado usa UNA sola query trayendo todo RM20101 (2074 filas en total
+  en sist2, sin problema de volumen) agrupado en JS por cliente - misma logica de
+  signo por RMDTYPAL que el detalle individual.
+  Mismo codigo: api/src/routes/controllers/getCuentaCorrienteSist2.js,
+  client/pages/reportes/sist2/cuenta-corriente.js.
+
+- Ajuste a "Cuenta corriente de cliente" (sist2), modo listado (cliente en blanco):
+  ahora cada cliente muestra su PROPIA tabla de documentos (encabezado = numero y
+  nombre del cliente; filas = Fecha, Documento, Monto, Saldo corrido - con saldo
+  inicial y saldo final), en vez de un resumen de una sola fila por cliente. Como son
+  ~300 clientes, se pagina de a 10 clientes en la pantalla (botones Anterior/Siguiente)
+  pero el backend siempre devuelve el listado COMPLETO (no pagina la query) - el Excel
+  descarga siempre todos los clientes con dos pestañas (Resumen: un renglon por cliente
+  con saldo inicial/final: Detalle: todos los movimientos de todos los clientes, uno
+  debajo del otro), sin importar en que pagina este parado el usuario al exportar.
+  Se saco el filtro que antes ocultaba clientes con movimiento neto $0 en el periodo -
+  ahora se listan si tienen AL MENOS UN movimiento, aunque se cancelen entre si (ej.
+  factura + recibo del mismo monto en el periodo) - es real actividad, vale la pena
+  verla. Subio de 284 a 396 clientes en la prueba de agosto/2026 por este cambio.
+  Mismo codigo: api/src/routes/controllers/getCuentaCorrienteSist2.js,
+  client/pages/reportes/sist2/cuenta-corriente.js.

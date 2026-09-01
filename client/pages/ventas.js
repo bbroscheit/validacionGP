@@ -2,6 +2,7 @@ import { useState } from "react";
 import ResultTable from "@/components/ResultTable";
 
 export default function Ventas() {
+  const [empresa, setEmpresa] = useState("ecobahia");
   const [sucursal, setSucursal] = useState("");
   const [fechaDesde, setFechaDesde] = useState("");
   const [fechaHasta, setFechaHasta] = useState("");
@@ -10,12 +11,22 @@ export default function Ventas() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // En "sist2" casi ninguna venta tiene el formato de comprobante fiscal ("P") que sí
+  // usa Ecobahia - con el checkbox tildado el reporte devuelve casi vacío para esa
+  // empresa, así que se destilda solo al cambiar de empresa (el usuario lo puede volver
+  // a tildar si igual quiere filtrar).
+  const cambiarEmpresa = (nuevaEmpresa) => {
+    setEmpresa(nuevaEmpresa);
+    setSoloConP(nuevaEmpresa === "ecobahia");
+  };
+
   const buscar = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError("");
     try {
       const params = new URLSearchParams();
+      params.set("empresa", empresa);
       if (sucursal) params.set("sucursal", sucursal);
       if (fechaDesde) params.set("fechaDesde", fechaDesde);
       if (fechaHasta) params.set("fechaHasta", fechaHasta);
@@ -38,8 +49,17 @@ export default function Ventas() {
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
         <div>
-          <label className="block text-sm mb-1">Sucursal (LOCNCODE)</label>
-          <input value={sucursal} onChange={(e) => setSucursal(e.target.value)} className="border border-[var(--color-border)] rounded px-2 py-1" />
+          <label className="block text-sm mb-1">Empresa</label>
+          <select value={empresa} onChange={(e) => cambiarEmpresa(e.target.value)} className="border border-[var(--color-border)] rounded px-2 py-1">
+            <option value="ecobahia">Ecobahia</option>
+            <option value="sist2">Sist2 (172.19.31.47)</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm mb-1">
+            Sucursal (LOCNCODE){empresa === "sist2" && " - no aplica en Sist2, usá el DOCID"}
+          </label>
+          <input value={sucursal} onChange={(e) => setSucursal(e.target.value)} disabled={empresa === "sist2"} className="border border-[var(--color-border)] rounded px-2 py-1 disabled:bg-gray-100" />
         </div>
         <div>
           <label className="block text-sm mb-1">Fecha desde</label>

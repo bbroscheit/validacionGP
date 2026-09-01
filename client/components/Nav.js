@@ -37,6 +37,16 @@ const menus = [
       { href: "/reportes/compras-categoria-contribuyente", label: "Compras por categoría y contribuyente" },
     ],
   },
+  {
+    label: "Ventas Sist2",
+    links: [
+      { href: "/reportes/sist2/ventas-por-sucursal", label: "Ventas por sucursal" },
+      { href: "/reportes/sist2/ventas-por-sucursal-cuenta", label: "Ventas por sucursal y cuenta" },
+      { href: "/reportes/sist2/asiento-ventas", label: "Asiento de ventas" },
+      { href: "/reportes/sist2/cobranzas", label: "Cobranzas por sucursal" },
+      { href: "/reportes/sist2/cuenta-corriente", label: "Cuenta corriente de cliente" },
+    ],
+  },
 ];
 
 export default function Nav() {

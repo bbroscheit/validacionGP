@@ -1,8 +1,19 @@
-const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolSist2, sql } = require('../../config/gpPool');
+const {
+  resolverSucursalSist2,
+  CLIENTE_SUCURSAL_JOIN_SIST2,
+  CLIENTE_SUCURSAL_SELECT_SIST2,
+  esNotaCreditoSist2,
+} = require('../../services/sist2Ventas');
+
+const POOLS = { ecobahia: getGpPoolEcobahia, sist2: getGpPoolSist2 };
 
 // Reporte 1 - Ventas por sucursal
-// Agrupa SOP30200 por PHONE3 (la columna real de sucursal - no LOCNCODE, que es la que
-// usa el endpoint base /ventas como filtro).
+// Ecobahia: agrupa SOP30200 por PHONE3 (la columna real de sucursal - no LOCNCODE, que es
+// la que usa el endpoint base /ventas como filtro).
+// sist2: PHONE3 solo no alcanza (casi siempre vacío) - se resuelve con las 3 fuentes de
+// services/sist2Ventas.js (PHONE3 -> DOCID -> ficha del cliente), y el signo se decide
+// por SOPTYPE en vez del prefijo NC (ver ese mismo módulo para el detalle).
 // Igual que en getVentas.js: TAXAMNT trae el IVA en Factura A (BCKTXAMT da 0) y en
 // Factura B es al revés (precio con impuesto incluido, el IVA "desagregado" está en
 // BCKTXAMT y TAXAMNT da 0). Por eso:
@@ -19,12 +30,14 @@ const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
 const MONEDA_VACIA = 'En Blanco';
 const MAX_ROWS = 100000;
 
-const getVentasPorSucursal = async ({ fechaDesde, fechaHasta, soloConP = true }) => {
+const getVentasPorSucursal = async ({ fechaDesde, fechaHasta, soloConP = true, empresa = 'ecobahia' }) => {
   if (!fechaDesde || !fechaHasta) {
     throw new Error('fechaDesde y fechaHasta son requeridos');
   }
 
-  const pool = await getGpPoolEcobahia();
+  const getPool = POOLS[empresa];
+  if (!getPool) throw new Error(`Empresa desconocida: "${empresa}"`);
+  const pool = await getPool();
   const soloConPBool = soloConP === false || soloConP === 'false' ? false : true;
 
   const bindFilters = (request) => {
@@ -42,32 +55,43 @@ const getVentasPorSucursal = async ({ fechaDesde, fechaHasta, soloConP = true })
       H.DOCDATE >= @fechaDesde
       AND H.DOCDATE <= @fechaHasta
       AND (@soloConP = 0 OR H.SOPNUMBE LIKE '%P%')
+      AND ISNULL(H.VOIDSTTS, 0) = 0 -- excluye comprobantes anulados en GP (no son ventas reales)
   `);
   const totalCount = count.recordset[0].total;
+
+  const clienteSucursalJoin = empresa === 'sist2' ? CLIENTE_SUCURSAL_JOIN_SIST2 : '';
+  const clienteSucursalSelect = empresa === 'sist2' ? CLIENTE_SUCURSAL_SELECT_SIST2 : '';
 
   const detalleRequest = bindFilters(pool.request());
   const detalle = await detalleRequest.query(`
     SELECT TOP (${MAX_ROWS})
-      NULLIF(LTRIM(RTRIM(H.PHONE3)), '') AS Sucursal,
+      NULLIF(LTRIM(RTRIM(H.PHONE3)), '') AS PHONE3,
+      LTRIM(RTRIM(H.DOCID)) AS DOCID,
       LTRIM(RTRIM(H.SOPNUMBE)) AS Comprobante,
+      H.SOPTYPE,
       H.DOCDATE,
       ISNULL(H.SUBTOTAL, 0) AS SUBTOTAL,
       ISNULL(H.TAXAMNT, 0) AS TAXAMNT,
-      ISNULL(H.BCKTXAMT, 0) AS BCKTXAMT
+      ISNULL(H.BCKTXAMT, 0) AS BCKTXAMT${clienteSucursalSelect}
     FROM SOP30200 AS H
+    ${clienteSucursalJoin}
     WHERE
       H.DOCDATE >= @fechaDesde
       AND H.DOCDATE <= @fechaHasta
       AND (@soloConP = 0 OR H.SOPNUMBE LIKE '%P%')
+      AND ISNULL(H.VOIDSTTS, 0) = 0
     ORDER BY H.DOCDATE ASC
   `);
 
   const base = detalle.recordset.map((row) => {
-    const signo = row.Comprobante.startsWith('NC') ? -1 : 1;
+    const signo = (empresa === 'sist2' ? esNotaCreditoSist2(row.SOPTYPE) : row.Comprobante.startsWith('NC')) ? -1 : 1;
     const neto = signo * (row.SUBTOTAL - row.BCKTXAMT);
     const impuestos = signo * (row.TAXAMNT + row.BCKTXAMT);
+    const sucursal = empresa === 'sist2'
+      ? resolverSucursalSist2({ phone3: row.PHONE3, docid: row.DOCID, clienteUserdef2: row.ClienteSucursal })
+      : row.PHONE3;
     return {
-      Sucursal: row.Sucursal || MONEDA_VACIA,
+      Sucursal: sucursal || MONEDA_VACIA,
       Comprobante: row.Comprobante,
       DOCDATE: row.DOCDATE,
       Neto: neto,

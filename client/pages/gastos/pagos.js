@@ -2,6 +2,7 @@ import { useState } from "react";
 import ResultTable from "@/components/ResultTable";
 
 export default function Pagos() {
+  const [empresa, setEmpresa] = useState("ecobahia");
   const [cuentaDesde, setCuentaDesde] = useState("");
   const [cuentaHasta, setCuentaHasta] = useState("");
   const [fechaDesde, setFechaDesde] = useState("");
@@ -16,6 +17,7 @@ export default function Pagos() {
     setError("");
     try {
       const params = new URLSearchParams();
+      params.set("empresa", empresa);
       params.set("cuentaDesde", cuentaDesde);
       params.set("cuentaHasta", cuentaHasta);
       if (fechaDesde) params.set("fechaDesde", fechaDesde);
@@ -37,10 +39,17 @@ export default function Pagos() {
       <h1 className="text-xl font-semibold mb-4">Pagos</h1>
       <p className="text-sm text-gray-600 mb-4">
         GL20000 filtrado por rango de cuentas, mostrando solo ORGNTSRC = PMPAY (todos, incluye
-        los que tienen &quot;OPV&quot; en ORCTRNUM que también se ven en Gastos).
+        los que tienen &quot;OPV&quot; o &quot;EGRE&quot; en ORCTRNUM que también se ven en Gastos).
       </p>
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
+        <div>
+          <label className="block text-sm mb-1">Empresa</label>
+          <select value={empresa} onChange={(e) => setEmpresa(e.target.value)} className="border border-[var(--color-border)] rounded px-2 py-1">
+            <option value="ecobahia">Ecobahia</option>
+            <option value="sist2">Sist2 (172.19.31.47)</option>
+          </select>
+        </div>
         <div>
           <label className="block text-sm mb-1">Cuenta desde (ACTNUMST)</label>
           <input required value={cuentaDesde} onChange={(e) => setCuentaDesde(e.target.value)} className="border border-[var(--color-border)] rounded px-2 py-1" />

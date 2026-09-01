@@ -14,12 +14,15 @@ const getComprasPorSucursalCuenta = require('./controllers/getComprasPorSucursal
 const getAsientoCompras = require('./controllers/getAsientoCompras.js');
 const getSucursalesCompras = require('./controllers/getSucursalesCompras.js');
 const getComprasPorCategoriaContribuyente = require('./controllers/getComprasPorCategoriaContribuyente.js');
+const getCobranzasSist2 = require('./controllers/getCobranzasSist2.js');
+const getClientesSist2 = require('./controllers/getClientesSist2.js');
+const getCuentaCorrienteSist2 = require('./controllers/getCuentaCorrienteSist2.js');
 
 // Endpoint 1 - Ventas: SOP30200/SOP30300 filtrado por sucursal y fechas
 validacionRouter.get('/ventas', async (req, res) => {
   try {
-    const { sucursal, fechaDesde, fechaHasta, soloConP } = req.query;
-    const data = await getVentas({ sucursal, fechaDesde, fechaHasta, soloConP });
+    const { sucursal, fechaDesde, fechaHasta, soloConP, empresa } = req.query;
+    const data = await getVentas({ sucursal, fechaDesde, fechaHasta, soloConP, empresa });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /ventas', e.message);
@@ -42,8 +45,8 @@ validacionRouter.get('/compras', async (req, res) => {
 // Endpoint 3 - Gastos (GL): GL20000/GL00100 filtrado por rango de cuentas de gastos
 validacionRouter.get('/gastos', async (req, res) => {
   try {
-    const { cuentaDesde, cuentaHasta, fechaDesde, fechaHasta } = req.query;
-    const data = await getGastos({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta });
+    const { cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, empresa } = req.query;
+    const data = await getGastos({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, empresa });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /gastos', e.message);
@@ -63,11 +66,11 @@ validacionRouter.get('/opb', async (req, res) => {
   }
 });
 
-// Reporte 1 - Ventas por sucursal: SOP30200 agrupado por PHONE3, monto facturado neto
+// Reporte 1 - Ventas por sucursal: SOP30200 agrupado por sucursal, monto facturado neto
 validacionRouter.get('/reportes/ventas-por-sucursal', async (req, res) => {
   try {
-    const { fechaDesde, fechaHasta, soloConP } = req.query;
-    const data = await getVentasPorSucursal({ fechaDesde, fechaHasta, soloConP });
+    const { fechaDesde, fechaHasta, soloConP, empresa } = req.query;
+    const data = await getVentasPorSucursal({ fechaDesde, fechaHasta, soloConP, empresa });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/ventas-por-sucursal', e.message);
@@ -76,11 +79,11 @@ validacionRouter.get('/reportes/ventas-por-sucursal', async (req, res) => {
 });
 
 // Reporte - Ventas por sucursal y cuenta contable: GL20000 (SOURCDOC=SJ) agrupado por
-// sucursal (vía SOP30200.PHONE3) y cuenta, excluyendo la cuenta de deudores por ventas
+// sucursal y cuenta, excluyendo la cuenta de deudores por ventas
 validacionRouter.get('/reportes/ventas-por-sucursal-cuenta', async (req, res) => {
   try {
-    const { fechaDesde, fechaHasta, soloConP } = req.query;
-    const data = await getVentasPorSucursalCuenta({ fechaDesde, fechaHasta, soloConP });
+    const { fechaDesde, fechaHasta, soloConP, empresa } = req.query;
+    const data = await getVentasPorSucursalCuenta({ fechaDesde, fechaHasta, soloConP, empresa });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/ventas-por-sucursal-cuenta', e.message);
@@ -91,8 +94,8 @@ validacionRouter.get('/reportes/ventas-por-sucursal-cuenta', async (req, res) =>
 // Reporte - Asiento contable de ventas (resumen Debe/Haber), opcionalmente por sucursal
 validacionRouter.get('/reportes/asiento-ventas', async (req, res) => {
   try {
-    const { fechaDesde, fechaHasta, sucursal, soloConP } = req.query;
-    const data = await getAsientoVentas({ fechaDesde, fechaHasta, sucursal, soloConP });
+    const { fechaDesde, fechaHasta, sucursal, soloConP, empresa } = req.query;
+    const data = await getAsientoVentas({ fechaDesde, fechaHasta, sucursal, soloConP, empresa });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/asiento-ventas', e.message);
@@ -103,7 +106,8 @@ validacionRouter.get('/reportes/asiento-ventas', async (req, res) => {
 // Lista de sucursales para poblar el selector de los reportes de ventas
 validacionRouter.get('/reportes/sucursales-ventas', async (req, res) => {
   try {
-    const data = await getSucursalesVentas();
+    const { empresa } = req.query;
+    const data = await getSucursalesVentas({ empresa });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/sucursales-ventas', e.message);
@@ -180,6 +184,44 @@ validacionRouter.get('/reportes/compras-categoria-contribuyente', async (req, re
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/compras-categoria-contribuyente', e.message);
+    res.status(500).json({ state: 'error', message: e.message });
+  }
+});
+
+// Reporte - Cobranzas por sucursal (solo sist2): recibos (GL20000, CRJ/RMJ) agrupados
+// por sucursal, resuelta vía la factura aplicada o, si no hay, la ficha del cliente
+validacionRouter.get('/reportes/sist2/cobranzas', async (req, res) => {
+  try {
+    const { fechaDesde, fechaHasta } = req.query;
+    const data = await getCobranzasSist2({ fechaDesde, fechaHasta });
+    res.status(200).json(data);
+  } catch (e) {
+    console.log('error en /reportes/sist2/cobranzas', e.message);
+    res.status(500).json({ state: 'error', message: e.message });
+  }
+});
+
+// Búsqueda de clientes (sist2) para el selector de Cuenta Corriente
+validacionRouter.get('/reportes/sist2/clientes', async (req, res) => {
+  try {
+    const { q } = req.query;
+    const data = await getClientesSist2({ q });
+    res.status(200).json(data);
+  } catch (e) {
+    console.log('error en /reportes/sist2/clientes', e.message);
+    res.status(500).json({ state: 'error', message: e.message });
+  }
+});
+
+// Reporte - Cuenta corriente de cliente (solo sist2): historial completo (RM20101) con
+// saldo inicial arrastrado + movimientos del período con saldo corrido
+validacionRouter.get('/reportes/sist2/cuenta-corriente', async (req, res) => {
+  try {
+    const { cliente, fechaDesde, fechaHasta } = req.query;
+    const data = await getCuentaCorrienteSist2({ cliente, fechaDesde, fechaHasta });
+    res.status(200).json(data);
+  } catch (e) {
+    console.log('error en /reportes/sist2/cuenta-corriente', e.message);
     res.status(500).json({ state: 'error', message: e.message });
   }
 });
