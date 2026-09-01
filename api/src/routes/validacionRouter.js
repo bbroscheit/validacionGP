@@ -15,6 +15,8 @@ const getComprasPorSucursalCuenta = require('./controllers/getComprasPorSucursal
 const getAsientoCompras = require('./controllers/getAsientoCompras.js');
 const getSucursalesCompras = require('./controllers/getSucursalesCompras.js');
 const getComprasPorCategoriaContribuyente = require('./controllers/getComprasPorCategoriaContribuyente.js');
+const getLibroIvaDigitalResumen = require('./controllers/getLibroIvaDigitalResumen.js');
+const getLibroIvaDigitalExport = require('./controllers/getLibroIvaDigitalExport.js');
 const getCobranzasSist2 = require('./controllers/getCobranzasSist2.js');
 const getClientesSist2 = require('./controllers/getClientesSist2.js');
 const getCuentaCorrienteSist2 = require('./controllers/getCuentaCorrienteSist2.js');
@@ -198,6 +200,30 @@ validacionRouter.get('/reportes/compras-categoria-contribuyente', async (req, re
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/compras-categoria-contribuyente', e.message);
+    res.status(500).json({ state: 'error', message: e.message });
+  }
+});
+
+// Libro IVA Digital (ARCA, R.G. 4597) - resumen Neto/Impuestos/Total de ventas y compras
+validacionRouter.get('/reportes/libro-iva-digital/resumen', async (req, res) => {
+  try {
+    const { fechaDesde, fechaHasta } = req.query;
+    const data = await getLibroIvaDigitalResumen({ fechaDesde, fechaHasta });
+    res.status(200).json(data);
+  } catch (e) {
+    console.log('error en /reportes/libro-iva-digital/resumen', e.message);
+    res.status(500).json({ state: 'error', message: e.message });
+  }
+});
+
+// Libro IVA Digital (ARCA, R.G. 4597) - genera los 4 .txt (ventas/compras x cbte/alicuotas)
+validacionRouter.get('/reportes/libro-iva-digital/export', async (req, res) => {
+  try {
+    const { fechaDesde, fechaHasta } = req.query;
+    const data = await getLibroIvaDigitalExport({ fechaDesde, fechaHasta });
+    res.status(200).json(data);
+  } catch (e) {
+    console.log('error en /reportes/libro-iva-digital/export', e.message);
     res.status(500).json({ state: 'error', message: e.message });
   }
 });

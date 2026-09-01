@@ -17,6 +17,7 @@ const menus = [
       { href: "/gastos/compras", label: "Compras (GL)" },
       { href: "/gastos/detalle-ventas", label: "Detalle de Ventas" },
       { href: "/opb", label: "OPB" },
+      { href: "/libro-iva-digital", label: "Libro IVA Digital (ARCA)" },
     ],
   },
   {
