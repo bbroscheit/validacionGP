@@ -1,5 +1,5 @@
 const { getGpPoolSist2, sql } = require('../../config/gpPool');
-const { resolverSucursalSist2 } = require('../../services/sist2Ventas');
+const { resolverSucursalSist2, bindInList } = require('../../services/sist2Ventas');
 
 // Reporte - Cobranzas por sucursal (solo sist2)
 // Los recibos (GL20000, SOURCDOC IN ('CRJ','RMJ'), igual clasificación que usa
@@ -30,14 +30,6 @@ const { resolverSucursalSist2 } = require('../../services/sist2Ventas');
 const CUENTA_DEUDORES = '113110-01-000';
 const MAX_ROWS = 100000;
 const MONEDA_VACIA = 'En Blanco';
-
-const bindInList = (request, prefix, values) => values
-  .map((value, i) => {
-    const name = `${prefix}${i}`;
-    request.input(name, sql.VarChar(75), value);
-    return `@${name}`;
-  })
-  .join(',');
 
 const getCobranzasSist2 = async ({ fechaDesde, fechaHasta }) => {
   if (!fechaDesde || !fechaHasta) {

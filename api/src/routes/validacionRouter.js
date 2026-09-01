@@ -5,6 +5,7 @@ const getCompras = require('./controllers/getCompras.js');
 const getGastos = require('./controllers/getGastos.js');
 const getOpb = require('./controllers/getOpb.js');
 const getVentasPorSucursal = require('./controllers/getVentasPorSucursal.js');
+const getVentasPorProvincia = require('./controllers/getVentasPorProvincia.js');
 const getVentasPorSucursalCuenta = require('./controllers/getVentasPorSucursalCuenta.js');
 const getAsientoVentas = require('./controllers/getAsientoVentas.js');
 const getSucursalesVentas = require('./controllers/getSucursalesVentas.js');
@@ -74,6 +75,19 @@ validacionRouter.get('/reportes/ventas-por-sucursal', async (req, res) => {
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/ventas-por-sucursal', e.message);
+    res.status(500).json({ state: 'error', message: e.message });
+  }
+});
+
+// Reporte - Ventas por provincia (solo Ecobahia): SOP30200 agrupado por STATE, monto
+// facturado neto (misma lógica que ventas-por-sucursal)
+validacionRouter.get('/reportes/ventas-por-provincia', async (req, res) => {
+  try {
+    const { fechaDesde, fechaHasta, soloConP } = req.query;
+    const data = await getVentasPorProvincia({ fechaDesde, fechaHasta, soloConP });
+    res.status(200).json(data);
+  } catch (e) {
+    console.log('error en /reportes/ventas-por-provincia', e.message);
     res.status(500).json({ state: 'error', message: e.message });
   }
 });
@@ -217,8 +231,8 @@ validacionRouter.get('/reportes/sist2/clientes', async (req, res) => {
 // saldo inicial arrastrado + movimientos del período con saldo corrido
 validacionRouter.get('/reportes/sist2/cuenta-corriente', async (req, res) => {
   try {
-    const { cliente, fechaDesde, fechaHasta } = req.query;
-    const data = await getCuentaCorrienteSist2({ cliente, fechaDesde, fechaHasta });
+    const { cliente, fechaDesde, fechaHasta, sucursal, pendientes } = req.query;
+    const data = await getCuentaCorrienteSist2({ cliente, fechaDesde, fechaHasta, sucursal, pendientes });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/sist2/cuenta-corriente', e.message);

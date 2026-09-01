@@ -1,0 +1,107 @@
+const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
+
+// Reporte - Ventas por provincia (solo Ecobahia): igual que Ventas por sucursal, pero
+// agrupa SOP30200 por STATE (provincia de la ficha del cliente/comprobante) en vez de
+// PHONE3. Misma lógica de Neto/Impuestos/Total y mismo signo invertido en notas de
+// crédito - ver getVentasPorSucursal.js para el detalle de esas cuentas.
+const MONEDA_VACIA = 'En Blanco';
+const MAX_ROWS = 100000;
+
+const getVentasPorProvincia = async ({ fechaDesde, fechaHasta, soloConP = true }) => {
+  if (!fechaDesde || !fechaHasta) {
+    throw new Error('fechaDesde y fechaHasta son requeridos');
+  }
+
+  const pool = await getGpPoolEcobahia();
+  const soloConPBool = soloConP === false || soloConP === 'false' ? false : true;
+
+  const bindFilters = (request) => {
+    request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
+    request.input('fechaHasta', sql.DateTime, new Date(fechaHasta));
+    request.input('soloConP', sql.Bit, soloConPBool);
+    return request;
+  };
+
+  const countRequest = bindFilters(pool.request());
+  const count = await countRequest.query(`
+    SELECT COUNT(*) AS total
+    FROM SOP30200 AS H
+    WHERE
+      H.DOCDATE >= @fechaDesde
+      AND H.DOCDATE <= @fechaHasta
+      AND (@soloConP = 0 OR H.SOPNUMBE LIKE '%P%')
+      AND ISNULL(H.VOIDSTTS, 0) = 0 -- excluye comprobantes anulados en GP (no son ventas reales)
+  `);
+  const totalCount = count.recordset[0].total;
+
+  const detalleRequest = bindFilters(pool.request());
+  const detalle = await detalleRequest.query(`
+    SELECT TOP (${MAX_ROWS})
+      NULLIF(LTRIM(RTRIM(H.STATE)), '') AS STATE,
+      LTRIM(RTRIM(H.SOPNUMBE)) AS Comprobante,
+      H.SOPTYPE,
+      H.DOCDATE,
+      ISNULL(H.SUBTOTAL, 0) AS SUBTOTAL,
+      ISNULL(H.TAXAMNT, 0) AS TAXAMNT,
+      ISNULL(H.BCKTXAMT, 0) AS BCKTXAMT
+    FROM SOP30200 AS H
+    WHERE
+      H.DOCDATE >= @fechaDesde
+      AND H.DOCDATE <= @fechaHasta
+      AND (@soloConP = 0 OR H.SOPNUMBE LIKE '%P%')
+      AND ISNULL(H.VOIDSTTS, 0) = 0
+    ORDER BY H.DOCDATE ASC
+  `);
+
+  const base = detalle.recordset.map((row) => {
+    const signo = row.Comprobante.startsWith('NC') ? -1 : 1;
+    const neto = signo * (row.SUBTOTAL - row.BCKTXAMT);
+    const impuestos = signo * (row.TAXAMNT + row.BCKTXAMT);
+    return {
+      // STATE viene con mayúsculas/minúsculas inconsistentes en GP ("Buenos Aires",
+      // "BUENOS AIRES", "buenos aires"...) - se normaliza a mayúsculas para que agrupe
+      // bien. Ojo: algunos valores son directamente nombres de ciudad y no de provincia
+      // (ej. "PUNTA ALTA", "SANTA ROSA") - eso es así en la data de origen, no se corrige acá.
+      Provincia: row.STATE ? row.STATE.toUpperCase() : MONEDA_VACIA,
+      Comprobante: row.Comprobante,
+      DOCDATE: row.DOCDATE,
+      Neto: neto,
+      Impuestos: impuestos,
+      Total: neto + impuestos,
+    };
+  });
+
+  const agrupado = new Map();
+  base.forEach((row) => {
+    if (!agrupado.has(row.Provincia)) {
+      agrupado.set(row.Provincia, { Provincia: row.Provincia, CantidadComprobantes: 0, Neto: 0, Impuestos: 0, Total: 0 });
+    }
+    const grupo = agrupado.get(row.Provincia);
+    grupo.CantidadComprobantes += 1;
+    grupo.Neto += row.Neto;
+    grupo.Impuestos += row.Impuestos;
+    grupo.Total += row.Total;
+  });
+
+  const rows = [...agrupado.values()].sort((a, b) => a.Provincia.localeCompare(b.Provincia));
+
+  const totalComprobantes = rows.reduce((acc, row) => acc + row.CantidadComprobantes, 0);
+  const totalNeto = rows.reduce((acc, row) => acc + row.Neto, 0);
+  const totalImpuestos = rows.reduce((acc, row) => acc + row.Impuestos, 0);
+  const totalGeneral = totalNeto + totalImpuestos;
+
+  return {
+    totalCount,
+    truncated: totalCount > MAX_ROWS,
+    base,
+    baseColumns: ['Provincia', 'Comprobante', 'DOCDATE', 'Neto', 'Impuestos', 'Total'],
+    rows,
+    columns: ['Provincia', 'CantidadComprobantes', 'Neto', 'Impuestos', 'Total'],
+    totalComprobantes,
+    totalNeto,
+    totalImpuestos,
+    totalGeneral,
+  };
+};
+
+module.exports = getVentasPorProvincia;

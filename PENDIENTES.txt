@@ -350,3 +350,106 @@ PENDIENTE
   verla. Subio de 284 a 396 clientes en la prueba de agosto/2026 por este cambio.
   Mismo codigo: api/src/routes/controllers/getCuentaCorrienteSist2.js,
   client/pages/reportes/sist2/cuenta-corriente.js.
+
+- Feature: filtro de Sucursal en "Cuenta corriente de cliente" (sist2) - desplegable
+  con las 6 sucursales + "Completo" (por defecto, sin filtrar). Al elegir una sucursal,
+  se muestran solo los documentos (facturas, notas de credito/debito, recibos) que
+  pertenecen a esa sucursal, con saldo inicial/corrido calculado SOLO sobre esos
+  documentos (no el saldo real total del cliente). Un cliente sin ningun documento de
+  la sucursal elegida no aparece (aplica tanto al listado de todos los clientes como
+  al detalle de uno puntual).
+  - Como los recibos no tienen sucursal propia (RM20101 no la guarda), se atribuyen
+    reusando exactamente los mismos 2 metodos ya usados en otros reportes:
+    - Factura/Devolucion (RMDTYPAL 1/7/8): se busca el comprobante en SOP30200 con el
+      SOPTYPE esperado (3 para Factura, 4 para Devolucion - evita el problema conocido
+      de numeros de comprobante repetidos, ver getVentasPorSucursalCuenta.js) y se
+      resuelve con resolverSucursalSist2 (PHONE3 -> DOCID -> ficha del cliente DE LA
+      FACTURA).
+    - Recibo (RMDTYPAL 9): igual que getCobranzasSist2.js - se busca a que factura(s)
+      esta aplicado (RM20201) y se prorratea por aplicacion; lo no atado a una factura
+      resuelta cae en la ficha del cliente DEL RECIBO.
+    - Otros tipos (Nota de Debito/Credito directa, Cargo Financiero - no vistos
+      todavia en sist2, sin comprobante en SOP30200) van directo a la ficha del
+      cliente del movimiento.
+  - Verificado el invariante: para CADA fila de RM20101, la suma de sus atribuciones
+    (puede ser mas de una si un recibo se aplico a facturas de mas de una sucursal)
+    da exactamente su Monto original - sin fugas ni duplicados. Probado con un cliente
+    real (18886): mismo saldo final ($5.140.000) con y sin filtro, porque todos sus
+    documentos hasta agosto/2026 resultaron ser de Bahia Blanca.
+  - Query en varias tandas (fetchEnLotes, de a 1500 valores) para no pasarse del
+    limite de ~2100 parametros por query de SQL Server, porque el listado completo
+    (modo "todos los clientes") puede referenciar mas de 1000 comprobantes distintos
+    de una sola vez.
+  - Se extrajo `bindInList` (ya usado en getCobranzasSist2.js) a
+    api/src/services/sist2Ventas.js como helper compartido, junto con
+    `SIST2_SUCURSALES` (lista fija de las 6 sucursales).
+  - Performance: modo "Completo" no cambia (~400ms, no hace falta atribuir nada).
+    Modo filtrado por sucursal (todos los clientes): ~5s (cruza ~1400 comprobantes +
+    ~400 clientes) - aceptable para un reporte que no se corre a cada rato.
+  Mismo codigo: api/src/routes/controllers/getCuentaCorrienteSist2.js,
+  api/src/services/sist2Ventas.js, api/src/routes/controllers/getCobranzasSist2.js
+  (solo el refactor de bindInList compartido), api/src/routes/validacionRouter.js,
+  client/pages/reportes/sist2/cuenta-corriente.js.
+
+- Correccion al Excel de "Cuenta corriente de cliente" (sist2, listado): ahora son 3
+  solapas en vez de 2, a pedido del usuario:
+  - "Base": detalle plano de los movimientos que estan en pantalla en este momento
+    (respeta el filtro de sucursal activo, si hay uno).
+  - "CC Todos los Clientes": la cuenta corriente completa (Saldo inicial + movimientos
+    + Saldo final, igual que se ve en pantalla) de TODOS los clientes, SIN filtrar por
+    sucursal - aunque haya un filtro activo en la pantalla, esta solapa siempre trae el
+    universo completo (se pide aparte al servidor si hace falta, es rapido - no hace
+    la atribucion de sucursal).
+  - "CC Clientes del Filtro": lo mismo pero solo de los clientes que estan filtrados
+    en este momento (si no hay filtro de sucursal activo, es igual a la anterior).
+  Como json_to_sheet solo soporta una tabla homogenea por hoja (no tablas separadas por
+  cliente como se ve en pantalla), cada cliente se arma como filas planas con una fila
+  "Saldo inicial" arriba y "Saldo final" abajo de sus movimientos - mismo efecto visual,
+  una sola tabla por hoja.
+  Mismo codigo: client/pages/reportes/sist2/cuenta-corriente.js.
+
+- Feature: checkbox "Montos pendientes" en "Cuenta corriente de cliente" (sist2),
+  desactivado por defecto. Al activarlo, solo se muestran documentos que TODAVIA
+  tienen saldo sin saldar - usa RM20101.CURTRXAM (el saldo actual de cada documento,
+  que GP va actualizando el mismo a medida que se aplican pagos) en vez de ORTRXAMT
+  (el monto original). Una factura parcialmente cobrada muestra el saldo que le queda,
+  no el monto original de la factura.
+  - Confirmado con el usuario: CURTRXAM es una foto de HOY, no un historico - un
+    documento viejo ya cobrado no va a aparecer aunque el rango de fechas elegido
+    incluya el momento en que todavia estaba pendiente. Es el comportamiento pedido
+    ("saldo pendiente a hoy"), documentado en el codigo y en la pantalla.
+  - Los recibos con saldo sin aplicar (plata a favor del cliente que todavia no se usо
+    para pagar ninguna factura puntual) tambien se incluyen, a pedido del usuario.
+  - Combinado con el filtro de Sucursal: en modo pendientes, un recibo con saldo sin
+    aplicar no tiene una factura a la que atarse (las lineas de RM20201 son
+    justamente la parte YA aplicada, lo opuesto a lo que se quiere mostrar) - va
+    directo a la ficha del cliente del recibo en vez de prorratear por aplicacion.
+  - Verificado el invariante: el saldo final de un cliente en modo "pendientes" (sin
+    rango de fechas) da EXACTO el mismo numero que su saldo final en modo normal
+    (mismo cliente, $890.000 en ambos casos) - tiene que dar igual porque las dos
+    formas de calcular el mismo saldo total (neto historico vs. saldos abiertos por
+    documento) son matematicamente equivalentes. Tambien probado con el filtro de
+    sucursal combinado.
+  Mismo codigo: api/src/routes/controllers/getCuentaCorrienteSist2.js,
+  api/src/routes/validacionRouter.js, client/pages/reportes/sist2/cuenta-corriente.js.
+
+- Ajuste a "Cuenta corriente de cliente" (sist2), modo listado: ahora se ve igual que
+  el modo detalle de un cliente puntual - columnas Fecha/Tipo/Documento/Debe/Haber/Saldo
+  en vez de Fecha/Documento/Monto/Saldo. Tipo sale del mismo mapeo de RMDTYPAL que ya
+  se usaba en el detalle (Factura/Devolucion/Recibo/etc.), ahora centralizado en un
+  helper compartido (tipoDeMovimiento) para no duplicarlo entre los dos modos.
+  Excel actualizado igual (columnas Cliente/Nombre/Fecha/Tipo/Documento/Debe/Haber/Saldo
+  en las 3 solapas).
+  Mismo codigo: api/src/routes/controllers/getCuentaCorrienteSist2.js,
+  client/pages/reportes/sist2/cuenta-corriente.js.
+
+[2026-09-01] Nuevo reporte "Ventas por provincia" (solo Ecobahia)
+- Igual estructura que Ventas por sucursal, pero agrupa SOP30200 por STATE en vez de PHONE3.
+- api/src/routes/controllers/getVentasPorProvincia.js (nuevo), ruta GET /reportes/ventas-por-provincia.
+- client/pages/reportes/ventas-por-provincia.js (nuevo), link agregado en Nav.js bajo "Ventas".
+- STATE se normaliza a MAYUSCULAS en JS para unificar variantes de mayus/minus ("Buenos Aires" /
+  "BUENOS AIRES" / "buenos aires" eran 3 grupos separados). OJO: la columna STATE en GP tiene
+  valores sucios - algunos comprobantes tienen un nombre de ciudad cargado ahi en vez de la
+  provincia real (ej. "PUNTA ALTA", "SANTA ROSA", "BAHIA BLANCA"), eso no se corrigio, se
+  muestra tal cual viene de la base. Validado con datos reales (ene-ago/2026): 17 grupos,
+  totalGeneral ~$2.367M.

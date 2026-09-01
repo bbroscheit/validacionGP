@@ -1,6 +1,9 @@
+const sql = require('mssql');
+
 // Reglas de ventas específicas de "sist2" compartidas entre getVentas.js,
-// getVentasPorSucursal.js, getVentasPorSucursalCuenta.js, getAsientoVentas.js y
-// getSucursalesVentas.js - centralizadas acá para no duplicar la misma lógica 5 veces.
+// getVentasPorSucursal.js, getVentasPorSucursalCuenta.js, getAsientoVentas.js,
+// getSucursalesVentas.js, getCobranzasSist2.js y getCuentaCorrienteSist2.js -
+// centralizadas acá para no duplicar la misma lógica en cada archivo.
 //
 // Sucursal: LOCNCODE no sirve en sist2 (siempre "PRINCIPAL"). Se resuelve con 3 fuentes,
 // en este orden de prioridad (confirmado contra PRD08 de sist2, jun-ago/2026 - las 3
@@ -54,9 +57,26 @@ const CLIENTE_SUCURSAL_SELECT_SIST2 = ', CU.USERDEF2 AS ClienteSucursal';
 // AWLI_DOCUMENTOS.DOCTYPEDESC (tiene errores de carga puntuales).
 const esNotaCreditoSist2 = (soptype) => soptype === 4;
 
+// Lista fija de sucursales de sist2 (mismos valores que devuelve resolverSucursalSist2)
+// - para poblar selectores de filtro en el frontend sin repetir el listado a mano.
+const SIST2_SUCURSALES = ['Bahía Blanca', 'Casa Central', 'La Pampa', 'Mar del Plata', 'Puerto Madryn', 'Tandil'];
+
+// Arma un "IN (@p0, @p1, ...)" parametrizado para listas de valores de largo variable
+// (mssql no soporta bindear un array directo) - compartido entre los reportes que
+// necesitan cruzar contra listas de comprobantes/clientes (Cobranzas, Cuenta Corriente).
+const bindInList = (request, prefix, values) => values
+  .map((value, i) => {
+    const name = `${prefix}${i}`;
+    request.input(name, sql.VarChar(75), value);
+    return `@${name}`;
+  })
+  .join(',');
+
 module.exports = {
   resolverSucursalSist2,
   CLIENTE_SUCURSAL_JOIN_SIST2,
   CLIENTE_SUCURSAL_SELECT_SIST2,
   esNotaCreditoSist2,
+  SIST2_SUCURSALES,
+  bindInList,
 };

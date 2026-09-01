@@ -23,6 +23,7 @@ const menus = [
     label: "Ventas",
     links: [
       { href: "/reportes/ventas-por-sucursal", label: "Ventas por sucursal" },
+      { href: "/reportes/ventas-por-provincia", label: "Ventas por provincia" },
       { href: "/reportes/ventas-por-sucursal-cuenta", label: "Ventas por sucursal y cuenta" },
       { href: "/reportes/asiento-ventas", label: "Asiento de ventas" },
       { href: "/reportes/ventas-categoria-contribuyente", label: "Ventas por categoría y contribuyente" },

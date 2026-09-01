@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { exportToExcel, exportToExcelMultiHoja } from "@/functions/exportToExcel";
 
 const CLIENTES_POR_PAGINA = 10;
+const SUCURSALES = ["Bahía Blanca", "Casa Central", "La Pampa", "Mar del Plata", "Puerto Madryn", "Tandil"];
 
 function formatMonto(n) {
   return (n ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -19,10 +20,13 @@ export default function CuentaCorrienteSist2() {
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
   const [fechaDesde, setFechaDesde] = useState("");
   const [fechaHasta, setFechaHasta] = useState("");
+  const [sucursal, setSucursal] = useState("");
+  const [pendientes, setPendientes] = useState(false);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [pagina, setPagina] = useState(1);
+  const [exportando, setExportando] = useState(false);
   const debounceRef = useRef(null);
 
   useEffect(() => {
@@ -63,6 +67,8 @@ export default function CuentaCorrienteSist2() {
       if (custnmbr) params.set("cliente", custnmbr);
       if (fechaDesde) params.set("fechaDesde", fechaDesde);
       if (fechaHasta) params.set("fechaHasta", fechaHasta);
+      if (sucursal) params.set("sucursal", sucursal);
+      if (pendientes) params.set("pendientes", "true");
 
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/reportes/sist2/cuenta-corriente?${params.toString()}`);
       const json = await res.json();
@@ -82,24 +88,58 @@ export default function CuentaCorrienteSist2() {
     consultar(clienteSeleccionado ? clienteSeleccionado.CUSTNMBR : null);
   };
 
-  // El Excel siempre exporta TODOS los clientes de data.clientes, no solo la página
-  // que se está viendo - dos pestañas: un resumen (un renglón por cliente) y el
-  // detalle completo (todos los movimientos de todos los clientes, uno debajo del otro).
-  const descargarExcelListado = () => {
+  const COLUMNAS_CC_EXCEL = ["Cliente", "Nombre", "Fecha", "Tipo", "Documento", "Debe", "Haber", "Saldo"];
+
+  // Arma, por cliente, su cuenta corriente completa como filas planas (una fila de
+  // "Saldo inicial" arriba, los movimientos, una fila de "Saldo final" abajo) - así se
+  // ve igual que en pantalla pero en una sola hoja de Excel, sin tener que armar tablas
+  // separadas por cliente (json_to_sheet solo soporta una tabla homogénea por hoja).
+  const armarFilasCuentaCorriente = (clientes) => clientes.flatMap((c) => [
+    { Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: "", Tipo: "", Documento: "Saldo inicial", Debe: null, Haber: null, Saldo: c.saldoInicial },
+    ...c.movimientos.map((m) => ({
+      Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: m.Fecha, Tipo: m.Tipo, Documento: m.Documento, Debe: m.Debe, Haber: m.Haber, Saldo: m.Saldo,
+    })),
+    { Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: "", Tipo: "", Documento: "Saldo final", Debe: null, Haber: null, Saldo: c.saldoFinal },
+  ]);
+
+  // El Excel siempre exporta TODOS los clientes, no solo la página que se está viendo -
+  // 3 pestañas: Base (detalle plano de lo que está en pantalla ahora mismo), Cuentas
+  // corrientes de TODOS los clientes (sin filtrar, aunque haya un filtro de sucursal
+  // activo - se pide aparte si hace falta) y Cuentas corrientes de los clientes DEL
+  // FILTRO (los que están filtrados en este momento - si no hay filtro, es lo mismo
+  // que "Todos").
+  const descargarExcelListado = async () => {
     if (!data || data.modo !== "listado") return;
-    const resumen = data.clientes.map((c) => ({
-      Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, SaldoInicial: c.saldoInicial, SaldoFinal: c.saldoFinal,
-    }));
-    const detalle = data.clientes.flatMap((c) => c.movimientos.map((m) => ({
-      Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: m.Fecha, Documento: m.Documento, Monto: m.Monto, Saldo: m.Saldo,
-    })));
-    exportToExcelMultiHoja(
-      [
-        { name: "Resumen", rows: resumen, columns: ["Cliente", "Nombre", "SaldoInicial", "SaldoFinal"] },
-        { name: "Detalle", rows: detalle, columns: ["Cliente", "Nombre", "Fecha", "Documento", "Monto", "Saldo"] },
-      ],
-      "cuenta-corriente-todos-los-clientes"
-    );
+    setExportando(true);
+    try {
+      let clientesTodos = data.clientes;
+      if (sucursal) {
+        const params = new URLSearchParams();
+        if (fechaDesde) params.set("fechaDesde", fechaDesde);
+        if (fechaHasta) params.set("fechaHasta", fechaHasta);
+        if (pendientes) params.set("pendientes", "true");
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/reportes/sist2/cuenta-corriente?${params.toString()}`);
+        const json = await res.json();
+        if (res.ok && json.modo === "listado") clientesTodos = json.clientes;
+      }
+
+      const base = data.clientes.flatMap((c) => c.movimientos.map((m) => ({
+        Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: m.Fecha, Tipo: m.Tipo, Documento: m.Documento, Debe: m.Debe, Haber: m.Haber, Saldo: m.Saldo,
+      })));
+
+      exportToExcelMultiHoja(
+        [
+          { name: "Base", rows: base, columns: COLUMNAS_CC_EXCEL },
+          { name: "CC Todos los Clientes", rows: armarFilasCuentaCorriente(clientesTodos), columns: COLUMNAS_CC_EXCEL },
+          { name: "CC Clientes del Filtro", rows: armarFilasCuentaCorriente(data.clientes), columns: COLUMNAS_CC_EXCEL },
+        ],
+        "cuenta-corriente-todos-los-clientes"
+      );
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setExportando(false);
+    }
   };
 
   const totalPaginas = data && data.modo === "listado" ? Math.max(1, Math.ceil(data.clientes.length / CLIENTES_POR_PAGINA)) : 1;
@@ -115,7 +155,12 @@ export default function CuentaCorrienteSist2() {
         y recibos, todas en una sola tabla). El saldo inicial suma TODO lo anterior a la fecha
         &quot;desde&quot;, no solo el rango elegido, para que el saldo corrido sea el saldo real.
         Dejando el campo Cliente en blanco trae el listado de todos los clientes con saldo -
-        hacé clic en uno para ver su detalle.
+        hacé clic en uno para ver su detalle. El filtro de Sucursal muestra solo los documentos
+        (facturas, notas de crédito/débito y recibos) de esa sucursal - un cliente sin ningún
+        documento de la sucursal elegida no aparece. &quot;Montos pendientes&quot; muestra solo
+        los documentos que todavía tienen saldo sin saldar HOY (incluye recibos con saldo sin
+        aplicar) - no es una foto histórica: un documento viejo ya cobrado no aparece aunque
+        el rango de fechas incluya el momento en que todavía estaba pendiente.
       </p>
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
@@ -147,6 +192,15 @@ export default function CuentaCorrienteSist2() {
           )}
         </div>
         <div>
+          <label className="block text-sm mb-1">Sucursal</label>
+          <select value={sucursal} onChange={(e) => setSucursal(e.target.value)} className="border border-[var(--color-border)] rounded px-2 py-1.5">
+            <option value="">Completo</option>
+            {SUCURSALES.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </div>
+        <div>
           <label className="block text-sm mb-1">Fecha desde</label>
           <input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)} className="border border-[var(--color-border)] rounded px-2 py-1" />
         </div>
@@ -154,6 +208,10 @@ export default function CuentaCorrienteSist2() {
           <label className="block text-sm mb-1">Fecha hasta</label>
           <input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)} className="border border-[var(--color-border)] rounded px-2 py-1" />
         </div>
+        <label className="flex items-center gap-2 text-sm pb-1.5">
+          <input type="checkbox" checked={pendientes} onChange={(e) => setPendientes(e.target.checked)} />
+          Montos pendientes
+        </label>
         <button type="submit" disabled={loading} className="bg-[var(--color-primary)] text-white rounded px-4 py-1.5">
           {loading ? "Buscando..." : "Buscar"}
         </button>
@@ -175,9 +233,10 @@ export default function CuentaCorrienteSist2() {
             </p>
             <button
               onClick={descargarExcelListado}
-              className="text-xs bg-green-700 text-white rounded px-3 py-1"
+              disabled={exportando}
+              className="text-xs bg-green-700 text-white rounded px-3 py-1 disabled:opacity-60"
             >
-              Descargar Excel (todos los clientes)
+              {exportando ? "Generando..." : "Descargar Excel (todos los clientes)"}
             </button>
           </div>
 
@@ -196,28 +255,32 @@ export default function CuentaCorrienteSist2() {
                     <thead>
                       <tr className="bg-gray-50">
                         <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Fecha</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Tipo</th>
                         <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Documento</th>
-                        <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Monto</th>
+                        <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Debe</th>
+                        <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Haber</th>
                         <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Saldo</th>
                       </tr>
                     </thead>
                     <tbody>
                       <tr className="bg-gray-100 italic">
-                        <td className="px-4 py-2 border-b border-[var(--color-border)]" colSpan={3}>Saldo inicial</td>
+                        <td className="px-4 py-2 border-b border-[var(--color-border)]" colSpan={5}>Saldo inicial</td>
                         <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(c.saldoInicial)}</td>
                       </tr>
                       {c.movimientos.map((m, i) => (
                         <tr key={`${m.Documento}-${i}`} className={i % 2 ? "" : "bg-gray-50/60"}>
                           <td className="px-4 py-2 border-b border-[var(--color-border)] whitespace-nowrap">{formatFecha(m.Fecha)}</td>
+                          <td className="px-4 py-2 border-b border-[var(--color-border)] whitespace-nowrap">{m.Tipo}</td>
                           <td className="px-4 py-2 border-b border-[var(--color-border)] whitespace-nowrap">{m.Documento}</td>
-                          <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(m.Monto)}</td>
+                          <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{m.Debe ? formatMonto(m.Debe) : ""}</td>
+                          <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{m.Haber ? formatMonto(m.Haber) : ""}</td>
                           <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(m.Saldo)}</td>
                         </tr>
                       ))}
                     </tbody>
                     <tfoot>
                       <tr className="bg-gray-100 font-semibold">
-                        <td className="px-4 py-2 border-t-2 border-[var(--color-border)]" colSpan={3}>Saldo final</td>
+                        <td className="px-4 py-2 border-t-2 border-[var(--color-border)]" colSpan={5}>Saldo final</td>
                         <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(c.saldoFinal)}</td>
                       </tr>
                     </tfoot>
