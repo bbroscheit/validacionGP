@@ -41,10 +41,13 @@ const getVentasPorProvincia = async ({ fechaDesde, fechaHasta, soloConP = true }
       LTRIM(RTRIM(H.SOPNUMBE)) AS Comprobante,
       H.SOPTYPE,
       H.DOCDATE,
+      LTRIM(RTRIM(H.CUSTNMBR)) AS Cliente,
+      LTRIM(RTRIM(C.CUSTNAME)) AS NombreCliente,
       ISNULL(H.SUBTOTAL, 0) AS SUBTOTAL,
       ISNULL(H.TAXAMNT, 0) AS TAXAMNT,
       ISNULL(H.BCKTXAMT, 0) AS BCKTXAMT
     FROM SOP30200 AS H
+    LEFT JOIN RM00101 AS C ON C.CUSTNMBR = H.CUSTNMBR
     WHERE
       H.DOCDATE >= @fechaDesde
       AND H.DOCDATE <= @fechaHasta
@@ -65,6 +68,8 @@ const getVentasPorProvincia = async ({ fechaDesde, fechaHasta, soloConP = true }
       Provincia: row.STATE ? row.STATE.toUpperCase() : MONEDA_VACIA,
       Comprobante: row.Comprobante,
       DOCDATE: row.DOCDATE,
+      Cliente: row.Cliente,
+      NombreCliente: row.NombreCliente,
       Neto: neto,
       Impuestos: impuestos,
       Total: neto + impuestos,
@@ -94,7 +99,7 @@ const getVentasPorProvincia = async ({ fechaDesde, fechaHasta, soloConP = true }
     totalCount,
     truncated: totalCount > MAX_ROWS,
     base,
-    baseColumns: ['Provincia', 'Comprobante', 'DOCDATE', 'Neto', 'Impuestos', 'Total'],
+    baseColumns: ['Provincia', 'Comprobante', 'DOCDATE', 'Cliente', 'NombreCliente', 'Neto', 'Impuestos', 'Total'],
     rows,
     columns: ['Provincia', 'CantidadComprobantes', 'Neto', 'Impuestos', 'Total'],
     totalComprobantes,

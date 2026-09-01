@@ -453,3 +453,11 @@ PENDIENTE
   provincia real (ej. "PUNTA ALTA", "SANTA ROSA", "BAHIA BLANCA"), eso no se corrigio, se
   muestra tal cual viene de la base. Validado con datos reales (ene-ago/2026): 17 grupos,
   totalGeneral ~$2.367M.
+
+[2026-09-01] Modal de documentos en "Ventas por provincia"
+- Al hacer click en una fila de provincia se abre un modal con el detalle de comprobantes
+  que componen ese total: Comprobante, Fecha, Cliente, Nombre, Neto, Impuestos, Total.
+- Se agrego Cliente (CUSTNMBR) y NombreCliente (RM00101.CUSTNAME) al detalle base del
+  reporte (getVentasPorProvincia.js).
+- Se evaluo agregar el numero de alquiler pero vive en las lineas del comprobante
+  (SOP30300), no en el documento - queda afuera por pedido del usuario.

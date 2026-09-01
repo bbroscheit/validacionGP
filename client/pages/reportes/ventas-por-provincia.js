@@ -16,6 +16,7 @@ export default function VentasPorProvincia() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [provinciaSeleccionada, setProvinciaSeleccionada] = useState(null);
 
   const buscar = async (e) => {
     e.preventDefault();
@@ -104,8 +105,12 @@ export default function VentasPorProvincia() {
               </thead>
               <tbody>
                 {data.rows.map((row, i) => (
-                  <tr key={row.Provincia} className={i % 2 ? "" : "bg-gray-50/60"}>
-                    <td className="px-4 py-2 border-b border-[var(--color-border)]">{row.Provincia}</td>
+                  <tr
+                    key={row.Provincia}
+                    onClick={() => setProvinciaSeleccionada(row.Provincia)}
+                    className={`cursor-pointer hover:bg-blue-50 ${i % 2 ? "" : "bg-gray-50/60"}`}
+                  >
+                    <td className="px-4 py-2 border-b border-[var(--color-border)] text-blue-700 underline">{row.Provincia}</td>
                     <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatEntero(row.CantidadComprobantes)}</td>
                     <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(row.Neto)}</td>
                     <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(row.Impuestos)}</td>
@@ -126,6 +131,60 @@ export default function VentasPorProvincia() {
           </div>
         </div>
       )}
+
+      {provinciaSeleccionada && (
+        <DocumentosProvinciaModal
+          provincia={provinciaSeleccionada}
+          documentos={data.base.filter((row) => row.Provincia === provinciaSeleccionada)}
+          onClose={() => setProvinciaSeleccionada(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function DocumentosProvinciaModal({ provincia, documentos, onClose }) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[85vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)]">
+          <h2 className="font-semibold">Documentos - {provincia} ({documentos.length})</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-800 text-xl leading-none px-2">
+            &times;
+          </button>
+        </div>
+        <div className="overflow-auto">
+          <table className="min-w-full text-sm">
+            <thead className="sticky top-0 bg-gray-50">
+              <tr>
+                <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Comprobante</th>
+                <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Fecha</th>
+                <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Cliente</th>
+                <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Nombre</th>
+                <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Neto</th>
+                <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Impuestos</th>
+                <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {documentos.map((row, i) => (
+                <tr key={row.Comprobante} className={i % 2 ? "" : "bg-gray-50/60"}>
+                  <td className="px-4 py-2 border-b border-[var(--color-border)]">{row.Comprobante}</td>
+                  <td className="px-4 py-2 border-b border-[var(--color-border)]">{row.DOCDATE ? new Date(row.DOCDATE).toLocaleDateString("es-AR") : ""}</td>
+                  <td className="px-4 py-2 border-b border-[var(--color-border)]">{row.Cliente}</td>
+                  <td className="px-4 py-2 border-b border-[var(--color-border)]">{row.NombreCliente}</td>
+                  <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(row.Neto)}</td>
+                  <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(row.Impuestos)}</td>
+                  <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(row.Total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
