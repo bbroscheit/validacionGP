@@ -20,6 +20,7 @@ const getLibroIvaDigitalExport = require('./controllers/getLibroIvaDigitalExport
 const getCobranzasSist2 = require('./controllers/getCobranzasSist2.js');
 const getClientesSist2 = require('./controllers/getClientesSist2.js');
 const getCuentaCorrienteSist2 = require('./controllers/getCuentaCorrienteSist2.js');
+const { putOverrideClasificacion, deleteOverrideClasificacion } = require('./controllers/overridesClasificacion.js');
 
 // Endpoint 1 - Ventas: SOP30200/SOP30300 filtrado por sucursal y fechas
 validacionRouter.get('/ventas', async (req, res) => {
@@ -262,6 +263,31 @@ validacionRouter.get('/reportes/sist2/cuenta-corriente', async (req, res) => {
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/sist2/cuenta-corriente', e.message);
+    res.status(500).json({ state: 'error', message: e.message });
+  }
+});
+
+// Overrides de clasificación (Postgres, app propia): corrección manual por comprobante
+// de Sucursal/Provincia cuando el dato de GP viene en blanco o mal cargado. Se aplican
+// dentro de getVentasPorSucursal.js / getVentasPorProvincia.js antes de agrupar.
+validacionRouter.put('/overrides/clasificacion', async (req, res) => {
+  try {
+    const { empresa, tipo, comprobante, valor, valorOriginal, usuario } = req.body;
+    const data = await putOverrideClasificacion({ empresa, tipo, comprobante, valor, valorOriginal, usuario });
+    res.status(200).json(data);
+  } catch (e) {
+    console.log('error en PUT /overrides/clasificacion', e.message);
+    res.status(500).json({ state: 'error', message: e.message });
+  }
+});
+
+validacionRouter.delete('/overrides/clasificacion', async (req, res) => {
+  try {
+    const { empresa, tipo, comprobante } = req.body;
+    const eliminado = await deleteOverrideClasificacion({ empresa, tipo, comprobante });
+    res.status(200).json({ eliminado });
+  } catch (e) {
+    console.log('error en DELETE /overrides/clasificacion', e.message);
     res.status(500).json({ state: 'error', message: e.message });
   }
 });

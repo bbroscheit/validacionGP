@@ -461,3 +461,44 @@ PENDIENTE
   reporte (getVentasPorProvincia.js).
 - Se evaluo agregar el numero de alquiler pero vive en las lineas del comprobante
   (SOP30300), no en el documento - queda afuera por pedido del usuario.
+
+[2026-09-02] Overrides manuales de Sucursal/Provincia (persistidos en Postgres)
+- Problema: "Ventas por sucursal" y "Ventas por provincia" (Ecobahia) muestran grupos en
+  blanco (PHONE3/STATE vacios en GP) o mal cargados (ej. STATE="SANTA ROSA", que es una
+  ciudad, no una provincia). Hacia falta poder corregirlos a mano y que la correccion
+  persista entre busquedas (si no, cada "Buscar" vuelve a traer el dato crudo de GP).
+- Se activo la base Postgres "validaciongp" que ya estaba prevista en api/src/bd.js (antes
+  con DB_PASSWORD vacio en .env, sin base creada). Se completo la password y se creo la
+  base. Tabla nueva: clasificacion_overrides (empresa, tipo['sucursal'|'provincia'],
+  comprobante, valor, valorOriginal, usuario) con unique (empresa, tipo, comprobante).
+  Modelo: api/src/models/ClasificacionOverride.js. Se sincroniza (crea tabla si no existe)
+  al arrancar la API (index.js).
+- Service api/src/services/clasificacionOverrides.js: getOverridesMap (para aplicar en los
+  reportes), upsertOverride, deleteOverride.
+- Rutas: PUT /overrides/clasificacion (guarda/actualiza), DELETE /overrides/clasificacion
+  (revierte, vuelve a mostrar el valor calculado de GP). Controller:
+  api/src/routes/controllers/overridesClasificacion.js.
+- getVentasPorSucursal.js y getVentasPorProvincia.js: se agrego el join a RM00101 para
+  traer Cliente/NombreCliente por comprobante, y se aplica el override (por Comprobante)
+  ANTES de agrupar - si existe override, pisa el valor calculado de PHONE3/STATE (o de
+  resolverSucursalSist2 en sist2). Cada fila base incluye Editado:true/false.
+- Granularidad elegida: por comprobante (no por cliente) - decision del usuario, mas
+  preciso aunque implique corregir de a un comprobante si hay varios con el mismo error.
+- Frontend: client/components/DocumentosClasificacionModal.js (nuevo, compartido entre
+  ventas-por-sucursal.js y ventas-por-provincia.js) - al hacer click en un grupo se abre el
+  modal con los comprobantes, cada fila tiene boton "editar" (input con datalist de
+  sugerencias = valores ya existentes en el reporte) + Guardar/Cancelar, y si esta
+  editado aparece el tag "editado" con boton "revertir". Al guardar/revertir se
+  vuelve a ejecutar la busqueda para reflejar el cambio.
+- Validado end-to-end: upsert via HTTP (PUT), aplicacion sobre un comprobante real
+  (SANTA ROSA -> La Pampa, movio de grupo correctamente), delete/revert, y build de
+  Next.js OK.
+
+[2026-09-02] Correccion: Provincia se edita con lista cerrada de las 24 provincias
+- El modal de edicion (DocumentosClasificacionModal.js) ahora soporta modoSeleccion:
+  "lista" (select cerrado, sin texto libre) o "libre" (input+datalist, permite texto
+  libre con sugerencias) - por defecto "libre".
+- Ventas por provincia usa modoSeleccion="lista" con las 23 provincias + CABA fijas
+  (no depende de lo que ya aparezca en el reporte).
+- Ventas por sucursal sigue en modo "libre" (sugiere las sucursales ya vistas en el
+  reporte, pero no hay una lista nacional fija de sucursales).

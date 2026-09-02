@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { exportToExcelMultiHoja } from "@/functions/exportToExcel";
+import DocumentosClasificacionModal from "@/components/DocumentosClasificacionModal";
 
 function formatMonto(n) {
   return (n ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -8,6 +9,33 @@ function formatMonto(n) {
 function formatEntero(n) {
   return (n ?? 0).toLocaleString("es-AR");
 }
+
+const PROVINCIAS_ARGENTINA = [
+  "BUENOS AIRES",
+  "CIUDAD AUTONOMA DE BUENOS AIRES",
+  "CATAMARCA",
+  "CHACO",
+  "CHUBUT",
+  "CORDOBA",
+  "CORRIENTES",
+  "ENTRE RIOS",
+  "FORMOSA",
+  "JUJUY",
+  "LA PAMPA",
+  "LA RIOJA",
+  "MENDOZA",
+  "MISIONES",
+  "NEUQUEN",
+  "RIO NEGRO",
+  "SALTA",
+  "SAN JUAN",
+  "SAN LUIS",
+  "SANTA CRUZ",
+  "SANTA FE",
+  "SANTIAGO DEL ESTERO",
+  "TIERRA DEL FUEGO",
+  "TUCUMAN",
+];
 
 export default function VentasPorProvincia() {
   const [fechaDesde, setFechaDesde] = useState("");
@@ -18,8 +46,7 @@ export default function VentasPorProvincia() {
   const [error, setError] = useState("");
   const [provinciaSeleccionada, setProvinciaSeleccionada] = useState(null);
 
-  const buscar = async (e) => {
-    e.preventDefault();
+  const ejecutarBusqueda = async () => {
     setLoading(true);
     setError("");
     try {
@@ -39,13 +66,19 @@ export default function VentasPorProvincia() {
     }
   };
 
+  const buscar = (e) => {
+    e.preventDefault();
+    ejecutarBusqueda();
+  };
+
   return (
     <div>
       <h1 className="text-xl font-semibold mb-4">Ventas por provincia</h1>
       <p className="text-sm text-gray-600 mb-4">
         SOP30200 agrupado por provincia (STATE). El monto facturado es el neto (SUBTOTAL - BCKTXAMT,
         con signo invertido en notas de crédito) - la suma total debe cerrar contra el subtotal del
-        libro IVA Ventas del mismo período.
+        libro IVA Ventas del mismo período. Hacé click en una provincia para ver y corregir los
+        comprobantes que la componen.
       </p>
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
@@ -132,59 +165,20 @@ export default function VentasPorProvincia() {
         </div>
       )}
 
-      {provinciaSeleccionada && (
-        <DocumentosProvinciaModal
-          provincia={provinciaSeleccionada}
+      {provinciaSeleccionada && data && (
+        <DocumentosClasificacionModal
+          empresa="ecobahia"
+          tipo="provincia"
+          campo="Provincia"
+          campoLabel="Provincia"
+          valorGrupo={provinciaSeleccionada}
           documentos={data.base.filter((row) => row.Provincia === provinciaSeleccionada)}
+          sugerencias={PROVINCIAS_ARGENTINA}
+          modoSeleccion="lista"
           onClose={() => setProvinciaSeleccionada(null)}
+          onGuardado={ejecutarBusqueda}
         />
       )}
-    </div>
-  );
-}
-
-function DocumentosProvinciaModal({ provincia, documentos, onClose }) {
-  return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div
-        className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[85vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)]">
-          <h2 className="font-semibold">Documentos - {provincia} ({documentos.length})</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-800 text-xl leading-none px-2">
-            &times;
-          </button>
-        </div>
-        <div className="overflow-auto">
-          <table className="min-w-full text-sm">
-            <thead className="sticky top-0 bg-gray-50">
-              <tr>
-                <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Comprobante</th>
-                <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Fecha</th>
-                <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Cliente</th>
-                <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Nombre</th>
-                <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Neto</th>
-                <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Impuestos</th>
-                <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {documentos.map((row, i) => (
-                <tr key={row.Comprobante} className={i % 2 ? "" : "bg-gray-50/60"}>
-                  <td className="px-4 py-2 border-b border-[var(--color-border)]">{row.Comprobante}</td>
-                  <td className="px-4 py-2 border-b border-[var(--color-border)]">{row.DOCDATE ? new Date(row.DOCDATE).toLocaleDateString("es-AR") : ""}</td>
-                  <td className="px-4 py-2 border-b border-[var(--color-border)]">{row.Cliente}</td>
-                  <td className="px-4 py-2 border-b border-[var(--color-border)]">{row.NombreCliente}</td>
-                  <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(row.Neto)}</td>
-                  <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(row.Impuestos)}</td>
-                  <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(row.Total)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
     </div>
   );
 }

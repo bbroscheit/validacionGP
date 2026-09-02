@@ -5,6 +5,7 @@ const {
   CLIENTE_SUCURSAL_SELECT_SIST2,
   esNotaCreditoSist2,
 } = require('../../services/sist2Ventas');
+const { getOverridesMap } = require('../../services/clasificacionOverrides');
 
 const POOLS = { ecobahia: getGpPoolEcobahia, sist2: getGpPoolSist2 };
 
@@ -62,38 +63,47 @@ const getVentasPorSucursal = async ({ fechaDesde, fechaHasta, soloConP = true, e
   const clienteSucursalJoin = empresa === 'sist2' ? CLIENTE_SUCURSAL_JOIN_SIST2 : '';
   const clienteSucursalSelect = empresa === 'sist2' ? CLIENTE_SUCURSAL_SELECT_SIST2 : '';
 
-  const detalleRequest = bindFilters(pool.request());
-  const detalle = await detalleRequest.query(`
-    SELECT TOP (${MAX_ROWS})
-      NULLIF(LTRIM(RTRIM(H.PHONE3)), '') AS PHONE3,
-      LTRIM(RTRIM(H.DOCID)) AS DOCID,
-      LTRIM(RTRIM(H.SOPNUMBE)) AS Comprobante,
-      H.SOPTYPE,
-      H.DOCDATE,
-      ISNULL(H.SUBTOTAL, 0) AS SUBTOTAL,
-      ISNULL(H.TAXAMNT, 0) AS TAXAMNT,
-      ISNULL(H.BCKTXAMT, 0) AS BCKTXAMT${clienteSucursalSelect}
-    FROM SOP30200 AS H
-    ${clienteSucursalJoin}
-    WHERE
-      H.DOCDATE >= @fechaDesde
-      AND H.DOCDATE <= @fechaHasta
-      AND (@soloConP = 0 OR H.SOPNUMBE LIKE '%P%')
-      AND ISNULL(H.VOIDSTTS, 0) = 0
-    ORDER BY H.DOCDATE ASC
-  `);
+  const [detalle, overridesMap] = await Promise.all([
+    bindFilters(pool.request()).query(`
+      SELECT TOP (${MAX_ROWS})
+        NULLIF(LTRIM(RTRIM(H.PHONE3)), '') AS PHONE3,
+        LTRIM(RTRIM(H.DOCID)) AS DOCID,
+        LTRIM(RTRIM(H.SOPNUMBE)) AS Comprobante,
+        H.SOPTYPE,
+        H.DOCDATE,
+        LTRIM(RTRIM(H.CUSTNMBR)) AS Cliente,
+        LTRIM(RTRIM(NC.CUSTNAME)) AS NombreCliente,
+        ISNULL(H.SUBTOTAL, 0) AS SUBTOTAL,
+        ISNULL(H.TAXAMNT, 0) AS TAXAMNT,
+        ISNULL(H.BCKTXAMT, 0) AS BCKTXAMT${clienteSucursalSelect}
+      FROM SOP30200 AS H
+      LEFT JOIN RM00101 AS NC ON NC.CUSTNMBR = H.CUSTNMBR
+      ${clienteSucursalJoin}
+      WHERE
+        H.DOCDATE >= @fechaDesde
+        AND H.DOCDATE <= @fechaHasta
+        AND (@soloConP = 0 OR H.SOPNUMBE LIKE '%P%')
+        AND ISNULL(H.VOIDSTTS, 0) = 0
+      ORDER BY H.DOCDATE ASC
+    `),
+    getOverridesMap({ empresa, tipo: 'sucursal' }),
+  ]);
 
   const base = detalle.recordset.map((row) => {
     const signo = (empresa === 'sist2' ? esNotaCreditoSist2(row.SOPTYPE) : row.Comprobante.startsWith('NC')) ? -1 : 1;
     const neto = signo * (row.SUBTOTAL - row.BCKTXAMT);
     const impuestos = signo * (row.TAXAMNT + row.BCKTXAMT);
-    const sucursal = empresa === 'sist2'
+    const sucursalCalculada = empresa === 'sist2'
       ? resolverSucursalSist2({ phone3: row.PHONE3, docid: row.DOCID, clienteUserdef2: row.ClienteSucursal })
       : row.PHONE3;
+    const override = overridesMap.get(row.Comprobante);
     return {
-      Sucursal: sucursal || MONEDA_VACIA,
+      Sucursal: override || sucursalCalculada || MONEDA_VACIA,
       Comprobante: row.Comprobante,
       DOCDATE: row.DOCDATE,
+      Cliente: row.Cliente,
+      NombreCliente: row.NombreCliente,
+      Editado: !!override,
       Neto: neto,
       Impuestos: impuestos,
       Total: neto + impuestos,
@@ -123,7 +133,7 @@ const getVentasPorSucursal = async ({ fechaDesde, fechaHasta, soloConP = true, e
     totalCount,
     truncated: totalCount > MAX_ROWS,
     base,
-    baseColumns: ['Sucursal', 'Comprobante', 'DOCDATE', 'Neto', 'Impuestos', 'Total'],
+    baseColumns: ['Sucursal', 'Comprobante', 'DOCDATE', 'Cliente', 'NombreCliente', 'Editado', 'Neto', 'Impuestos', 'Total'],
     rows,
     columns: ['Sucursal', 'CantidadComprobantes', 'Neto', 'Impuestos', 'Total'],
     totalComprobantes,

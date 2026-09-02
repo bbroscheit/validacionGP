@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { exportToExcelMultiHoja } from "@/functions/exportToExcel";
+import DocumentosClasificacionModal from "@/components/DocumentosClasificacionModal";
 
 function formatMonto(n) {
   return (n ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -16,9 +17,9 @@ export default function VentasPorSucursal() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [sucursalSeleccionada, setSucursalSeleccionada] = useState(null);
 
-  const buscar = async (e) => {
-    e.preventDefault();
+  const ejecutarBusqueda = async () => {
     setLoading(true);
     setError("");
     try {
@@ -38,13 +39,19 @@ export default function VentasPorSucursal() {
     }
   };
 
+  const buscar = (e) => {
+    e.preventDefault();
+    ejecutarBusqueda();
+  };
+
   return (
     <div>
       <h1 className="text-xl font-semibold mb-4">Ventas por sucursal</h1>
       <p className="text-sm text-gray-600 mb-4">
         SOP30200 agrupado por sucursal (PHONE3). El monto facturado es el neto (SUBTOTAL - BCKTXAMT,
         con signo invertido en notas de crédito) - la suma total debe cerrar contra el subtotal del
-        libro IVA Ventas del mismo período.
+        libro IVA Ventas del mismo período. Hacé click en una sucursal para ver y corregir los
+        comprobantes que la componen.
       </p>
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
@@ -104,8 +111,12 @@ export default function VentasPorSucursal() {
               </thead>
               <tbody>
                 {data.rows.map((row, i) => (
-                  <tr key={row.Sucursal} className={i % 2 ? "" : "bg-gray-50/60"}>
-                    <td className="px-4 py-2 border-b border-[var(--color-border)]">{row.Sucursal}</td>
+                  <tr
+                    key={row.Sucursal}
+                    onClick={() => setSucursalSeleccionada(row.Sucursal)}
+                    className={`cursor-pointer hover:bg-blue-50 ${i % 2 ? "" : "bg-gray-50/60"}`}
+                  >
+                    <td className="px-4 py-2 border-b border-[var(--color-border)] text-blue-700 underline">{row.Sucursal}</td>
                     <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatEntero(row.CantidadComprobantes)}</td>
                     <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(row.Neto)}</td>
                     <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(row.Impuestos)}</td>
@@ -125,6 +136,20 @@ export default function VentasPorSucursal() {
             </table>
           </div>
         </div>
+      )}
+
+      {sucursalSeleccionada && data && (
+        <DocumentosClasificacionModal
+          empresa="ecobahia"
+          tipo="sucursal"
+          campo="Sucursal"
+          campoLabel="Sucursal"
+          valorGrupo={sucursalSeleccionada}
+          documentos={data.base.filter((row) => row.Sucursal === sucursalSeleccionada)}
+          sugerencias={data.rows.map((r) => r.Sucursal).filter((v) => v !== "En Blanco")}
+          onClose={() => setSucursalSeleccionada(null)}
+          onGuardado={ejecutarBusqueda}
+        />
       )}
     </div>
   );
