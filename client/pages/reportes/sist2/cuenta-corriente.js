@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { exportToExcel, exportToExcelMultiHoja } from "@/functions/exportToExcel";
 
 const CLIENTES_POR_PAGINA = 10;
 const SUCURSALES = ["Bahía Blanca", "Casa Central", "La Pampa", "Mar del Plata", "Puerto Madryn", "Tandil"];
@@ -91,15 +90,17 @@ export default function CuentaCorrienteSist2() {
   const COLUMNAS_CC_EXCEL = ["Cliente", "Nombre", "Fecha", "Tipo", "Documento", "Debe", "Haber", "Saldo"];
 
   // Arma, por cliente, su cuenta corriente completa como filas planas (una fila de
-  // "Saldo inicial" arriba, los movimientos, una fila de "Saldo final" abajo) - así se
-  // ve igual que en pantalla pero en una sola hoja de Excel, sin tener que armar tablas
-  // separadas por cliente (json_to_sheet solo soporta una tabla homogénea por hoja).
+  // "Saldo inicial" arriba, los movimientos, una fila de "Saldo final" abajo, y una fila
+  // vacía como separador antes del siguiente cliente) - así se ve igual que en pantalla
+  // pero en una sola hoja de Excel, sin tener que armar tablas separadas por cliente
+  // (json_to_sheet solo soporta una tabla homogénea por hoja).
   const armarFilasCuentaCorriente = (clientes) => clientes.flatMap((c) => [
     { Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: "", Tipo: "", Documento: "Saldo inicial", Debe: null, Haber: null, Saldo: c.saldoInicial },
     ...c.movimientos.map((m) => ({
-      Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: m.Fecha, Tipo: m.Tipo, Documento: m.Documento, Debe: m.Debe, Haber: m.Haber, Saldo: m.Saldo,
+      Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: formatFecha(m.Fecha), Tipo: m.Tipo, Documento: m.Documento, Debe: m.Debe, Haber: m.Haber, Saldo: m.Saldo,
     })),
     { Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: "", Tipo: "", Documento: "Saldo final", Debe: null, Haber: null, Saldo: c.saldoFinal },
+    {},
   ]);
 
   // El Excel siempre exporta TODOS los clientes, no solo la página que se está viendo -
@@ -124,10 +125,11 @@ export default function CuentaCorrienteSist2() {
       }
 
       const base = data.clientes.flatMap((c) => c.movimientos.map((m) => ({
-        Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: m.Fecha, Tipo: m.Tipo, Documento: m.Documento, Debe: m.Debe, Haber: m.Haber, Saldo: m.Saldo,
+        Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: formatFecha(m.Fecha), Tipo: m.Tipo, Documento: m.Documento, Debe: m.Debe, Haber: m.Haber, Saldo: m.Saldo,
       })));
 
-      exportToExcelMultiHoja(
+      const { exportCuentaCorrienteExcel } = await import("@/functions/exportCuentaCorrienteExcel");
+      exportCuentaCorrienteExcel(
         [
           { name: "Base", rows: base, columns: COLUMNAS_CC_EXCEL },
           { name: "CC Todos los Clientes", rows: armarFilasCuentaCorriente(clientesTodos), columns: COLUMNAS_CC_EXCEL },
@@ -321,7 +323,21 @@ export default function CuentaCorrienteSist2() {
               {data.cliente.CUSTNMBR} - {data.cliente.CUSTNAME}
             </h2>
             <button
-              onClick={() => exportToExcel(data.movimientos, data.columns, `cuenta-corriente-${data.cliente.CUSTNMBR}`)}
+              onClick={async () => {
+                const { exportCuentaCorrienteExcel } = await import("@/functions/exportCuentaCorrienteExcel");
+                exportCuentaCorrienteExcel(
+                  [{
+                    name: "Cuenta corriente",
+                    rows: [
+                      { Fecha: "", Tipo: "", Documento: "Saldo inicial", Debe: null, Haber: null, Saldo: data.saldoInicial },
+                      ...data.movimientos.map((m) => ({ ...m, Fecha: formatFecha(m.Fecha) })),
+                      { Fecha: "", Tipo: "", Documento: "Saldo final", Debe: null, Haber: null, Saldo: data.saldoFinal },
+                    ],
+                    columns: data.columns,
+                  }],
+                  `cuenta-corriente-${data.cliente.CUSTNMBR}`
+                );
+              }}
               className="text-xs bg-green-700 text-white rounded px-3 py-1"
             >
               Descargar Excel

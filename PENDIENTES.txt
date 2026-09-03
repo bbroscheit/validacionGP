@@ -502,3 +502,56 @@ PENDIENTE
   (no depende de lo que ya aparezca en el reporte).
 - Ventas por sucursal sigue en modo "libre" (sugiere las sucursales ya vistas en el
   reporte, pero no hay una lista nacional fija de sucursales).
+
+[2026-09-03] Formato en los Excel de Cuenta Corriente (sist2)
+- Se agrego la libreria xlsx-js-style (fork de SheetJS que si escribe estilos - la
+  "xlsx" que ya se usaba en el resto de la app los ignora al exportar) SOLO para este
+  caso, cargada con import() dinamico dentro de exportCuentaCorrienteExcel (nueva func.
+  en client/functions/exportToExcel.js) para no sumarle ~400kb al bundle de las demas
+  paginas que usan exportToExcel/exportToExcelMultiHoja (confirmado con el build: esas
+  paginas quedaron igual, ~180kb).
+- Formato aplicado: encabezado con fondo oscuro y texto blanco en negrita, bordes finos
+  en toda la grilla, columnas Debe/Haber/Saldo con formato moneda (#,##0.00) alineadas a
+  la derecha, anchos de columna ajustados, y las filas "Saldo inicial"/"Saldo final"
+  resaltadas (italica + fondo gris claro / negrita + fondo gris + borde superior grueso)
+  igual que se ven en pantalla.
+- Se uso en las 2 descargas de cuenta-corriente.js: el Excel de "todos los clientes" (3
+  pestañas) y el Excel del cliente individual (que ahora tambien incluye las filas de
+  Saldo inicial/final, antes solo exportaba los movimientos sueltos).
+- Freeze del encabezado (fila fija al scrollear) evaluado pero NO se pudo confirmar que
+  xlsx-js-style lo escriba de forma confiable al guardar - se dejo afuera.
+- Validado generando un .xlsx real e inspeccionando xl/styles.xml y xl/worksheets/sheet1.xml
+  (unzip) para confirmar que los estilos, bordes y formato numerico quedan bien aplicados,
+  incluyendo el fix de celdas null->"" para que el borde no quede cortado en Debe/Haber
+  vacios. Build de Next.js OK.
+
+[2026-09-03] Fix: el Excel de Cuenta Corriente seguia sin formato
+- Causa: exportCuentaCorrienteExcel vivia en client/functions/exportToExcel.js y hacia
+  import() dinamico de "xlsx-js-style" (paquete CJS de terceros) dentro de la funcion.
+  La interoperabilidad CJS/ESM de ese import dinamico no se resolvia bien en el bundle
+  de Next.js (el objeto quedaba vacio/sin las funciones esperadas), asi que terminaba
+  fallando en silencio o generando un Excel sin ningun estilo aplicado.
+- Fix: se movio exportCuentaCorrienteExcel a su propio archivo
+  (client/functions/exportCuentaCorrienteExcel.js) que importa "xlsx-js-style" de forma
+  ESTATICA (mismo patron que ya usa exportToExcel.js con "xlsx", que si funciona hace
+  rato). Ese archivo nuevo se pide con import() dinamico desde cuenta-corriente.js SOLO
+  cuando se necesita (asi sigue sin sumarle peso al resto de la app) - pero ahora es
+  nuestro propio modulo ESM el que se importa dinamicamente, no la libreria de terceros
+  directamente, evitando el problema de interoperabilidad.
+- Validado esta vez con un test end-to-end real: se levanto la API y el cliente, se
+  controlo un Chrome real con Puppeteer (instalado aparte, fuera del proyecto, para no
+  ensuciar client/package.json), se hizo la busqueda y se clickeo "Descargar Excel" de
+  verdad, y se inspecciono el .xlsx descargado (unzip xl/styles.xml y sheet.xml):
+  encabezado en negrita con fondo oscuro, fila "Saldo inicial" con fondo gris e italica,
+  anchos de columna aplicados, y bordes incluso en las celdas vacias de Debe/Haber.
+
+[2026-09-03] Ajustes visuales pedidos por el usuario en el Excel de Cuenta Corriente
+- Fila "Saldo final" de cada cliente: pasa de gris a celeste (BFDBFE).
+- Fila en blanco (sin bordes ni relleno) entre un cliente y el siguiente, en las hojas
+  "CC Todos los Clientes" y "CC Clientes del Filtro".
+- Fecha: antes se exportaba el valor crudo (con hora/timezone); ahora se formatea con el
+  mismo formatFecha() que ya se usa en pantalla (dd/m/aaaa) - aplicado en las 3 hojas
+  (Base, CC Todos, CC Filtro) y en el export del detalle de un cliente individual.
+- Validado de nuevo con el mismo test end-to-end (Puppeteer + Chrome real + descarga real
+  + inspeccion de xl/styles.xml y sheet2.xml): confirmado fill FFBFDBFE en Saldo final,
+  fila separadora con fillId=0/borderId=0 (sin estilo), y fechas cortas tipo "3/7/2026".
