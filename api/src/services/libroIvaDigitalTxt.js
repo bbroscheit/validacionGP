@@ -36,7 +36,7 @@ function lineaVentaCbte(doc) {
     alpha(doc.numeroIdentificacion, ANCHO.numeroIdentificacion),
     alpha(doc.nombre, ANCHO.nombre),
     importe(doc.importeTotal),
-    importe(0), // 10 - conceptos que no integran el neto
+    importe(doc.importeNoGravado), // 10 - conceptos que no integran el precio neto gravado (AWLI_IMPUESTOS "...NOGRAV")
     importe(0), // 11 - percepción a no categorizados
     importe(doc.importeExento), // 12
     importe(0), // 13 - percep/pagos impuestos nacionales
@@ -83,7 +83,7 @@ function lineaCompraCbte(doc) {
     alpha(doc.numeroIdentificacion, ANCHO.numeroIdentificacion),
     alpha(doc.nombre, ANCHO.nombre),
     importe(doc.importeTotal),
-    importe(0), // 10 - conceptos que no integran el neto
+    importe(doc.importeNoGravado), // 10 - conceptos que no integran el precio neto gravado (AWLI_IMPUESTOS "...NOGRAV")
     importe(doc.importeExento), // 11
     importe(doc.percepcionIVA), // 12
     importe(0), // 13 - percep otros impuestos nacionales

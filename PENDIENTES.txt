@@ -582,3 +582,28 @@ PENDIENTE
 - Validado con datos reales de GP (julio/2026, 1333 ventas y 315 compras): las 4 archivos
   dan EXACTO el ancho esperado en TODAS las lineas, sin ninguna desviacion - VENTAS_CBTE
   266, VENTAS_ALICUOTAS 62, COMPRAS_CBTE 325, COMPRAS_ALICUOTAS 84.
+
+[2026-09-14] Fix mas importante: "No Gravado" se perdia (Importe Total no coincidia)
+- Reporte del usuario: ARCA rechaza casi todas las lineas de Compras con "El importe
+  Total no coincide con la suma de los demas montos".
+- Causa: el campo 10 ("Importe total de conceptos que no integran el precio neto
+  gravado") estaba hardcodeado en importe(0) en lineaVentaCbte Y lineaCompraCbte, pero
+  GP SI trae ese dato (fila AWLI_IMPUESTOS "IVACF 0% NOGRAV" / "IVADF 0% NOGRAV") y
+  clasificarImpuestos() en libroIvaDigitalData.js YA lo calculaba bien en
+  doc.importeNoGravado - simplemente nunca se usaba al armar la linea. Fix: campo 10 =
+  importe(doc.importeNoGravado) en ambos builders.
+- Validado con el comprobante real que reporto el usuario (FC A0016-00004155,
+  ESTACION DE SERVICIO SARMIENTO): Neto 73995.89 + IVA 15539.14 + Percepcion IIBB
+  1342.12 + No Gravado 15478.97 = 106356.12 = Importe Total exacto.
+- Validado en TODO julio+agosto/2026: Ventas cierra 2556/2556 (100%). Compras cierra
+  607/614 (98.9%) - los 7 restantes NO son bugs de codigo:
+    - 6 son Facturas C (monotributista, no discrimina IVA) - GP no genera NINGUNA fila
+      en AWLI_IMPUESTOS para estas, entonces el importe total no tiene donde
+      reflejarse en el archivo actual.
+    - 2 son Facturas A con diferencia chica/grande que no cuadra ni sumando todo lo que
+      trae AWLI_IMPUESTOS (comprobante 0019-00002737, $0.64 de diferencia - redondeo
+      menor; comprobante 0011-00037825, $62.092,40 de diferencia - esto no es
+      redondeo, parece un problema de carga en GP para ese comprobante puntual).
+  DECISION DEL USUARIO: no tocar nada de esto en el codigo - si falta un impuesto o hay
+  un error de redondeo, es un error de carga en GP y lo tienen que corregir ellos ahi,
+  no maquillarlo desde el generador del txt.
