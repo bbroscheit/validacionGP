@@ -1,13 +1,13 @@
 const { num, alpha, importe, fecha, tipoCambio } = require('./fixedWidth');
 const { tipoComprobante, alicuotaCodigo, CODIGO_MONEDA_PESOS } = require('./arcaCodes');
 
-// Anchos de campo adoptados para los campos "Var." del instructivo (no traen longitud
-// exacta en la revisión 30/07/2025 - ver NOTAS.md / aviso en el chat). Son los anchos
-// convencionales usados por otros generadores de este mismo régimen (heredado de la RG
-// 3685). Antes de la primera presentación real, validar un archivo de prueba contra el
-// importador de ARCA y ajustar acá si observa algo distinto.
+// Anchos de campo confirmados contra el "ANEXO I - Diseños de Registros" oficial
+// (libro-iva-digital-diseno-registros.pdf, distinto del PDF de "Especificaciones" que
+// solo describe el significado de cada campo, sin anchos) - posiciones byte a byte para
+// LIBRO_IVA_DIGITAL_{VENTAS,COMPRAS}_{CBTE,ALICUOTAS}. Totales verificados: Ventas CBTE
+// 266, Ventas Alícuotas 62, Compras CBTE 325, Compras Alícuotas 84.
 const ANCHO = {
-  numeroComprobante: 8,
+  numeroComprobante: 20, // antes 8 - el instructivo pide 20 para "número de comprobante" (y "hasta")
   numeroIdentificacion: 20,
   nombre: 30,
   despachoImportacion: 16,
@@ -49,7 +49,9 @@ function lineaVentaCbte(doc) {
     alpha(codigoOperacion(doc), 1),
     importe(doc.otrosTributos), // 21
     num(0, 8), // 22 - fecha vencimiento/pago (n/a, no es servicio público)
-    importe(0), // 23 - reintegro TurIVA
+    // LIBRO_IVA_DIGITAL_VENTAS_CBTE termina en el campo 22 (266 caracteres) - el campo
+    // "Reintegro TurIVA" pertenece únicamente al archivo separado VENTAS_TurIVA_CBTE
+    // (281 caracteres), no corresponde acá.
   ];
   return campos.join('');
 }
@@ -97,7 +99,9 @@ function lineaCompraCbte(doc) {
     num(0, ANCHO.cuitEmisorCorredor), // 23 - CUIT emisor/corredor (no aplica, no hay granos/corredores)
     alpha('', ANCHO.denominacionEmisorCorredor), // 24
     importe(0), // 25 - IVA comisión
-    importe(0), // 26 - reintegro TurIVA
+    // LIBRO_IVA_DIGITAL_COMPRAS_CBTE termina en el campo 25 (325 caracteres) - el campo
+    // "Reintegro TurIVA" pertenece únicamente al archivo separado COMPRAS_TurIVA_CBTE,
+    // no corresponde acá.
   ];
   return campos.join('');
 }

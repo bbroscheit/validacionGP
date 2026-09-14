@@ -555,3 +555,30 @@ PENDIENTE
 - Validado de nuevo con el mismo test end-to-end (Puppeteer + Chrome real + descarga real
   + inspeccion de xl/styles.xml y sheet2.xml): confirmado fill FFBFDBFE en Saldo final,
   fila separadora con fillId=0/borderId=0 (sin estilo), y fechas cortas tipo "3/7/2026".
+
+[2026-09-14] Fix: anchos incorrectos en los .txt de Libro IVA Digital (compras y ventas)
+- Reporte del usuario: Compras esperaba 325 y recibia 328, Ventas esperaba 266 y recibia
+  257 (esos numeros ya venian de la propia especificacion de ARCA, el usuario los tenia
+  bien - el codigo generaba mal la linea).
+- Causa raiz (confirmada contra el documento oficial "ANEXO I - Disenos de Registros",
+  libro-iva-digital-diseno-registros.pdf en afip.gob.ar - DISTINTO del PDF de
+  "Especificaciones" que solo describe el significado de los campos, sin anchos byte a
+  byte; la nota vieja en el codigo decia "no trae longitud exacta" porque quien lo escribio
+  solo habia mirado el PDF equivocado):
+  1) "Numero de comprobante" (y "Numero de comprobante hasta" en Ventas) son de 20
+     caracteres, no 8 como tenia el codigo (ANCHO.numeroComprobante).
+  2) Tanto Ventas CBTE como Compras CBTE traian un campo de mas al final
+     ("Reintegro TurIVA", 15 caracteres) que en realidad pertenece a un archivo
+     SEPARADO (VENTAS_TurIVA_CBTE / COMPRAS_TurIVA_CBTE) que esta empresa no genera -
+     no corresponde en el archivo estandar.
+  Las dos correcciones se cancelan parcialmente y explican exacto los numeros reportados:
+  Compras 328->325 (+12 del ancho, -15 del campo de mas), Ventas 257->266 (+24 de los dos
+  campos de 8->20, -15 del campo de mas).
+- Se corrigio tambien VENTAS_ALICUOTAS y COMPRAS_ALICUOTAS (comparten el mismo
+  ANCHO.numeroComprobante) aunque el usuario no los habia reportado todavia - tambien
+  usan "Numero de comprobante" de 20 caracteres segun el mismo documento oficial.
+- api/src/services/libroIvaDigitalTxt.js: ANCHO.numeroComprobante 8->20, se saco el campo
+  "reintegro TurIVA" de lineaVentaCbte y lineaCompraCbte.
+- Validado con datos reales de GP (julio/2026, 1333 ventas y 315 compras): las 4 archivos
+  dan EXACTO el ancho esperado en TODAS las lineas, sin ninguna desviacion - VENTAS_CBTE
+  266, VENTAS_ALICUOTAS 62, COMPRAS_CBTE 325, COMPRAS_ALICUOTAS 84.
