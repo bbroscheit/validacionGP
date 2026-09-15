@@ -874,3 +874,33 @@ Gate de acceso al login por lista blanca de companias (2026-09-15)
   gate hasta que expire - si a alguien le sacan el acceso mientras tiene sesion activa,
   sigue entrando hasta que la sesion vence. Mismo comportamiento que ya tenia el resto de
   la autorizacion, no se cambio.
+- Nota aparte (no relacionado a este feature): un 401 en GET /auth/me resulto ser CORS
+  (la IP nueva desde la que se probaba no estaba en CORS_ORIGIN) - el usuario lo
+  resolvio agregandola.
+
+Libro IVA Digital (compras) - fecha contable y tipo de comprobante (2026-09-15)
+- Dos fixes en api/src/services/libroIvaDigitalData.js (fetchCompras), a pedido del
+  usuario:
+  1) El periodo se filtraba por DOCDATE (fecha del comprobante) y por eso faltaban
+     comprobantes con DOCDATE de un mes pero cargados/imputados contablemente al mes
+     siguiente (ej. real en PRD08: DOCNUMBR "FC A0011-00037101", DOCDATE 06/07 pero
+     PSTGDATE 01/08). Se cambio el filtro (WHERE de PM30200/PM20000, en el header y en el
+     EXISTS de AWLI_IMPUESTOS) a PSTGDATE (fecha contable/de asiento a GL). El campo
+     impreso en el .txt sigue siendo DOCDATE - es la "fecha del comprobante" que exige
+     ARCA, dato distinto del periodo en que se declara. Validado: en agosto/2026 aparecen
+     16 comprobantes mas que con el filtro viejo, todos con DOCDATE de julio y PSTGDATE de
+     agosto.
+  2) Los comprobantes de compra en GP tienen un DOCTYPE (1 Factura, 2 Cargo financiero, 3
+     Cargo misceláneo, 4 Devolucion, 5 Nota de credito, 6 Pago - confirmado contra PRD08).
+     El filtro viejo solo miraba el prefijo/patron del numero de comprobante (heuristica),
+     sin mirar el DOCTYPE real - a pedido del usuario (Cargo misceláneo y Devolucion son
+     ajustes internos, no deben ir en el .txt), se agrego el filtro explicito
+     H.DOCTYPE IN (1, 2, 5) para que quede garantizado por el dato real de GP y no por
+     casualidad del numero. En la data actual de PRD08 no habia ningun Cargo
+     misceláneo/Devolucion con numeracion de pinta fiscal (0 registros afectados hoy),
+     pero queda la garantia para el futuro si alguna vez cargan uno asi.
+- Validado contra datos reales (PRD08), no HTTP: fetchCompras corrio sobre un rango
+  amplio (2026-01-01 a 2026-08-31) sin errores, 1031 comprobantes.
+- Pendiente: no se toco fetchVentas (Ventas no tiene este problema reportado por el
+  usuario en esta vuelta) ni ningun otro reporte que use DOCDATE para compras (Compras
+  por sucursal, Gastos, etc.) - solo Libro IVA Digital, que es lo que se pidio.

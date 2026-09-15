@@ -159,6 +159,27 @@ async function fetchCompras(fechaDesde, fechaHasta) {
   request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
   request.input('fechaHasta', sql.DateTime, new Date(fechaHasta));
 
+  // Se filtra el período por PSTGDATE (fecha contable/de asiento a GL), no por DOCDATE
+  // (fecha del comprobante) - a pedido del usuario: hay facturas de proveedores con fecha
+  // de comprobante de un mes pero cargadas/imputadas contablemente en el mes siguiente
+  // (confirmado contra PRD08, ej. DOCNUMBR "FC A0011-00037101" con DOCDATE 06/07 pero
+  // PSTGDATE 01/08), y con el filtro por DOCDATE ese tipo de comprobante quedaba afuera
+  // del período que corresponde declarar. El campo impreso en el .txt sigue siendo
+  // DOCDATE (doc.fecha más abajo) - es la "fecha del comprobante" que exige ARCA, un dato
+  // distinto del período en el que se declara.
+  //
+  // DOCTYPE (los 6 tipos estándar de PM30200/PM20000, confirmado contra PRD08): 1=Factura,
+  // 2=Cargo financiero, 3=Cargo misceláneo, 4=Devolución, 5=Nota de crédito, 6=Pago (OP/EF,
+  // ya quedan afuera por el filtro de prefijo/patrón de abajo). A pedido del usuario: Cargo
+  // misceláneo y Devolución son ajustes internos y no deben ir en el .txt, aunque el
+  // prefijo del comprobante pueda parecer fiscal - se filtra por DOCTYPE explícitamente en
+  // vez de confiar solo en el prefijo/patrón del número.
+  const DOCTYPE_FACTURA = 1;
+  const DOCTYPE_CARGO_FINANCIERO = 2;
+  const DOCTYPE_NOTA_CREDITO = 5;
+  request.input('docTypeFactura', sql.SmallInt, DOCTYPE_FACTURA);
+  request.input('docTypeCargoFinanciero', sql.SmallInt, DOCTYPE_CARGO_FINANCIERO);
+  request.input('docTypeNotaCredito', sql.SmallInt, DOCTYPE_NOTA_CREDITO);
   const header = await request.query(`
     SELECT
       LTRIM(RTRIM(H.DOCNUMBR)) AS DOCNUMBR,
@@ -169,17 +190,18 @@ async function fetchCompras(fechaDesde, fechaHasta) {
       LTRIM(RTRIM(PT.VENDNAME)) AS VENDNAME,
       LTRIM(RTRIM(PT.TXRGNNUM)) AS TXRGNNUM
     FROM (
-      SELECT DOCNUMBR, VCHRNMBR, DOCDATE, DOCAMNT, VENDORID FROM PM30200
-      WHERE DOCDATE >= @fechaDesde AND DOCDATE <= @fechaHasta AND ISNULL(VOIDED, 0) = 0
+      SELECT DOCNUMBR, VCHRNMBR, DOCDATE, PSTGDATE, DOCAMNT, VENDORID, DOCTYPE FROM PM30200
+      WHERE PSTGDATE >= @fechaDesde AND PSTGDATE <= @fechaHasta AND ISNULL(VOIDED, 0) = 0
       UNION ALL
-      SELECT DOCNUMBR, VCHRNMBR, DOCDATE, DOCAMNT, VENDORID FROM PM20000
-      WHERE DOCDATE >= @fechaDesde AND DOCDATE <= @fechaHasta AND ISNULL(VOIDED, 0) = 0
+      SELECT DOCNUMBR, VCHRNMBR, DOCDATE, PSTGDATE, DOCAMNT, VENDORID, DOCTYPE FROM PM20000
+      WHERE PSTGDATE >= @fechaDesde AND PSTGDATE <= @fechaHasta AND ISNULL(VOIDED, 0) = 0
     ) AS H
     LEFT JOIN PM00200 AS PT ON LTRIM(RTRIM(PT.VENDORID)) = LTRIM(RTRIM(H.VENDORID))
     WHERE
       LEFT(LTRIM(RTRIM(H.DOCNUMBR)), 2) IN ('FC', 'NC', 'ND')
       AND LTRIM(RTRIM(H.DOCNUMBR)) LIKE '__ [ABC][0-9][0-9][0-9][0-9]-%'
-    ORDER BY H.DOCDATE, H.DOCNUMBR
+      AND H.DOCTYPE IN (@docTypeFactura, @docTypeCargoFinanciero, @docTypeNotaCredito)
+    ORDER BY H.PSTGDATE, H.DOCNUMBR
   `);
 
   const impuestosRequest = pool.request();
@@ -191,12 +213,12 @@ async function fetchCompras(fechaDesde, fechaHasta) {
     WHERE AI.TYPE = 1
       AND EXISTS (
         SELECT 1 FROM (
-          SELECT VCHRNMBR, DOCDATE FROM PM30200 WHERE ISNULL(VOIDED, 0) = 0
+          SELECT VCHRNMBR, PSTGDATE FROM PM30200 WHERE ISNULL(VOIDED, 0) = 0
           UNION ALL
-          SELECT VCHRNMBR, DOCDATE FROM PM20000 WHERE ISNULL(VOIDED, 0) = 0
+          SELECT VCHRNMBR, PSTGDATE FROM PM20000 WHERE ISNULL(VOIDED, 0) = 0
         ) AS H
         WHERE LTRIM(RTRIM(H.VCHRNMBR)) = LTRIM(RTRIM(AI.VCHRNMBR))
-          AND H.DOCDATE >= @fechaDesde AND H.DOCDATE <= @fechaHasta
+          AND H.PSTGDATE >= @fechaDesde AND H.PSTGDATE <= @fechaHasta
       )
   `);
 
