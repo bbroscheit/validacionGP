@@ -930,3 +930,68 @@ Cargo misceláneo / Devolucion excluidos de todos los reportes de Compras (2026-
   Asiento de compras sigue cerrando (Debe = Haber, diferencia ~0 por redondeo de punto
   flotante).
 - Fuera de alcance (confirmado con el usuario): "Compras" (listado crudo) sin cambios.
+
+Investigacion de diferencia de $63M en Compras por sucursal, y exclusion de Pagos (2026-09-15)
+- El usuario reporto una diferencia entre "el total de compras del mes" (591.192.596,58)
+  y lo que mostraba Compras por sucursal (528.119.587,96) - diferencia $63.073.008,62 -
+  con un comprobante puntual (FC A0001-01839477, CREDICOOP) mostrando Neto y Total en
+  negativo pese a ser una Factura.
+- Investigado contra PRD08: el comprobante toca una cuenta bancaria (111303-01-000 BANCO
+  CREDICOOP, ACCATNUM=22 "Bancos") junto con una cuenta de prestamo (223112-01-000 BCO.
+  CREDICOP-BCRA, ya intencionalmente incluida en Neto como "movimiento real" - ver el fix
+  de "RI Gravado/No Gravado" en compras-categoria-contribuyente) y las percepciones
+  (ACCATNUM=9). La cuenta bancaria funciona como contrapartida del pago (igual rol que
+  Proveedores 211101 o Visa Frances 223202, que ya estan excluidas) pero no esta en esa
+  lista - el reporte la cuenta como gasto real, dejando el comprobante en negativo.
+- Se sumaron TODAS las lineas de cuentas bancarias (ACCATNUM=22) dentro de "compras" en
+  agosto/2026 (Banco Credicoop + Banco Frances + Banco Chubut + Banco Pcia. Bs. As.):
+  $63.073.008,62 - coincide EXACTO con la diferencia reportada por el usuario, confirma
+  que es la causa completa.
+- Se le pregunto al usuario si excluir tambien las cuentas bancarias (ACCATNUM=22) del
+  Neto en Compras por sucursal y Compras por categoria y contribuyente (mismo trato que
+  Proveedores/Visa) - **decidio NO hacerlo por ahora** ("Solo excluir Pagos, no bancos").
+  Las cuentas bancarias siguen contandose en el Neto tal cual estaban - la diferencia de
+  $63M en el total del mes SIGUE EXISTIENDO, es decision explicita del usuario, no un bug
+  sin resolver. Queda documentado ahi por si se retoma mas adelante.
+- Lo que SI se corrigio (parte de la misma investigacion): de paso aparecio un segundo
+  caso mas chico, un comprobante "APR-00000001" ($1.500.000, cuenta Banco Credicoop en
+  DEBITO en vez de credito) que resulto ser un Pago (DOCTYPE=6) cargado con SOURCDOC
+  PMTRX en vez de PMPAY - se coló en los reportes de compras aunque no es una compra. Se
+  agrego DOCTYPE=6 a la misma exclusion de DOCTYPE 3/4 (Cargo misceláneo/Devolucion) de
+  hoy temprano, en los mismos 5 reportes/grupos: Compras por sucursal, Compras por
+  sucursal y cuenta, Asiento de compras, Compras por categoria y contribuyente, grupo
+  "compras" de Gastos. El listado crudo "Compras" ya excluia Pagos desde antes
+  (DOCTYPE_EXCLUIDO=6 en getCompras.js), no necesito cambio. Libro IVA Digital tampoco
+  necesito cambio - ya filtraba con lista blanca DOCTYPE IN (1,2,5), que excluye 6 por
+  construccion.
+- Validado contra datos reales (PRD08), no HTTP: "APR-00000001" ya no aparece en ninguno
+  de los 5 reportes/grupos (junio/2026), Asiento de compras sigue cerrando, y el total de
+  Compras por sucursal en agosto no cambio (528.119.587,96, esperado - no se toco
+  ACCATNUM=22 a pedido del usuario).
+
+Exclusion de cuentas bancarias (ACCATNUM=22) en Compras por sucursal y por categoria (2026-09-15)
+- El usuario volvio sobre la decision de arriba: confirmo que SI hay que excluir las
+  cuentas bancarias, con la explicacion de fondo: en GP, al cargar una factura hay dos
+  formas de pagarla - con una orden de pago aparte (contra Proveedores) o "en el mismo
+  documento" (el asiento queda directo contra el medio de pago que se haya usado, sea cual
+  sea). Julio uso Proveedores/Visa (ya excluidas); Agosto uso cuentas bancarias. La regla
+  general: hay que excluir SIEMPRE la cuenta que se uso de contrapartida de pago, sea cual
+  sea, porque sino el saldo da 0 o negativo (no deberia haber negativos salvo Notas de
+  credito).
+- Se agrego ACCATNUM_BANCOS=22 (categoria completa "Bancos" en GL00100, ~24 cuentas:
+  Banco Credicoop, Banco Frances, Banco Nacion, etc.) a la exclusion, en
+  getComprasPorSucursal.js y getComprasPorCategoriaContribuyente.js (la query de conteo de
+  getComprasPorSucursal.js no tenia join a GL00100 todavia, se agrego). NO se toco
+  ACCATNUM=24 (Prestamos) - esa categoria mezcla cuentas de puro pago con cuentas de
+  movimiento real (BBVA, Credicop), decision ya tomada en el fix de "RI Gravado/No
+  Gravado" de compras-categoria-contribuyente. Tampoco se toco Compras por sucursal y
+  cuenta (muestra TODAS las cuentas a proposito, con checkboxes) ni Asiento de compras
+  (tiene que cerrar Debe=Haber, no se puede sacar una cuenta suelta de un asiento sin
+  romper el balance) ni el grupo "compras" de Gastos (vista de detalle, mismo criterio).
+- Validado contra datos reales (PRD08), no HTTP: Compras por sucursal en agosto/2026 paso
+  de 528.119.587,96 a **591.192.596,58** - cierra EXACTO contra el total real que dio el
+  usuario, diferencia $0,00. Cero sucursales con total negativo (antes ninguna, ahora
+  sigue en cero, correcto). Julio sigue en 299.496.261,88 sin cambios y sin negativos
+  (no tenia cuentas bancarias de por medio). Compras por sucursal y cuenta sigue
+  mostrando las lineas de banco (reporte sin filtrar, como corresponde). Asiento de
+  compras sigue cerrando (diferencia ~0, redondeo de punto flotante).

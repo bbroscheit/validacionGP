@@ -18,19 +18,26 @@ const { getOverridesMap } = require('../../services/clasificacionOverrides');
 // Igual que en Gastos: GL20000.VOIDED no sirve (siempre da 0), así que se cruza contra
 // PM30200/PM20000.VOIDED=1 por DOCNUMBR+VENDORID para sacar los comprobantes anulados.
 //
-// Columnas Neto/Impuestos/Total, igual que en Ventas por sucursal. Se excluyen solo dos
-// cosas (confirmado contra PRD08):
-//   - Las cuentas que funcionan como contrapartida de pago (no una compra en sí):
-//     211101-01-000 "AV.-PROVEEDORES VARIOS" (la contrapartida de casi todas las
-//     compras) y 223202-01-000 "Visa Frances a Pagar" (mismo caso puntual ya detectado
-//     en Gastos - contrapartida de las compras con tarjeta, no un movimiento real). NO
-//     se excluye por categoría (ACCATNUM 24): esa categoría también incluye cuentas de
-//     préstamos (BBVA, Credicop) que sí son movimientos reales y deben quedar.
+// Columnas Neto/Impuestos/Total, igual que en Ventas por sucursal. Se excluyen (confirmado
+// contra PRD08):
+//   - Las cuentas que funcionan como contrapartida de pago (no una compra en sí). En GP,
+//     al cargar una factura hay dos opciones: pagarla con una orden de pago aparte (queda
+//     contra Proveedores) o pagarla "en el mismo documento" (el asiento queda directo
+//     contra el medio de pago que se haya usado) - a pedido del usuario, hay que excluir
+//     LA QUE SEA que se haya usado, sino el saldo termina en 0 o negativo (Gasto - Pago =
+//     0, o si no hay línea de gasto propia, como en un pago de préstamo, queda negativo).
+//     Confirmado: julio/2026 usó Proveedores (211101) y Visa Francés (223202); agosto/2026
+//     usó cuentas bancarias (ACCATNUM 22 - Banco Credicoop, Banco Francés, etc., $63M).
+//     Se excluye 211101/223202 puntuales y, por categoría, TODO ACCATNUM=22 (Bancos) - a
+//     diferencia de ACCATNUM=24 (Préstamos), que NO se excluye porque ahí sí hay cuentas
+//     con movimiento real (BBVA, Credicop) mezcladas con las de pura contrapartida.
 //   - Las cuentas de impuestos (ACCATNUM=9: IVA Crédito Fiscal y percepciones).
-// Todo lo demás (gastos, activo, préstamos) es Neto.
+// Todo lo demás (gastos, activo, préstamos) es Neto. No debería haber saldos negativos
+// salvo Notas de crédito.
 const MONEDA_VACIA = 'En Blanco';
 const CUENTAS_CONTRAPARTIDA = ['211101-01-000', '223202-01-000'];
 const ACCATNUM_IMPUESTOS = 9;
+const ACCATNUM_BANCOS = 22;
 const MAX_ROWS = 100000;
 
 const getComprasPorSucursal = async ({ fechaDesde, fechaHasta, sucursalRestringida = null }) => {
@@ -45,25 +52,28 @@ const getComprasPorSucursal = async ({ fechaDesde, fechaHasta, sucursalRestringi
     request.input('fechaHasta', sql.DateTime, new Date(fechaHasta));
     request.input('cuentaContrapartida1', sql.VarChar(75), CUENTAS_CONTRAPARTIDA[0]);
     request.input('cuentaContrapartida2', sql.VarChar(75), CUENTAS_CONTRAPARTIDA[1]);
+    request.input('accatnumBancos', sql.Int, ACCATNUM_BANCOS);
     return request;
   };
 
   // Se excluyen también los comprobantes VOIDED y, a pedido del usuario (mismo criterio
-  // que Libro IVA Digital), los DOCTYPE 3 (Cargo misceláneo) y 4 (Devolución) - son
-  // ajustes internos, no compras reales. El listado crudo "Compras" (getCompras.js) queda
-  // afuera de este cambio a propósito - ahí sí se quieren ver esos comprobantes.
+  // que Libro IVA Digital), los DOCTYPE 3 (Cargo misceláneo), 4 (Devolución) y 6 (Pago) -
+  // son ajustes internos o pagos, no compras reales (un Pago puede aparecer acá aunque en
+  // general use SOURCDOC PMPAY, ej. "APR-00000001" cargado con PMTRX). El listado crudo
+  // "Compras" (getCompras.js) queda afuera de este cambio a propósito - ahí sí se quieren
+  // ver esos comprobantes.
   const noAnuladaWhere = `
     AND NOT EXISTS (
       SELECT 1 FROM PM30200 P
       WHERE LTRIM(RTRIM(P.DOCNUMBR)) = LTRIM(RTRIM(G.ORDOCNUM))
         AND LTRIM(RTRIM(P.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
-        AND (P.VOIDED = 1 OR P.DOCTYPE IN (3, 4))
+        AND (P.VOIDED = 1 OR P.DOCTYPE IN (3, 4, 6))
     )
     AND NOT EXISTS (
       SELECT 1 FROM PM20000 P
       WHERE LTRIM(RTRIM(P.DOCNUMBR)) = LTRIM(RTRIM(G.ORDOCNUM))
         AND LTRIM(RTRIM(P.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
-        AND (P.VOIDED = 1 OR P.DOCTYPE IN (3, 4))
+        AND (P.VOIDED = 1 OR P.DOCTYPE IN (3, 4, 6))
     )
   `;
 
@@ -72,11 +82,13 @@ const getComprasPorSucursal = async ({ fechaDesde, fechaHasta, sucursalRestringi
     SELECT COUNT(*) AS total
     FROM GL20000 AS G
     INNER JOIN GL00105 AS N ON N.ACTINDX = G.ACTINDX
+    INNER JOIN GL00100 AS A ON A.ACTINDX = G.ACTINDX
     WHERE
       LTRIM(RTRIM(G.SOURCDOC)) IN ('PMTRX', 'PMVVR')
       AND G.TRXDATE >= @fechaDesde
       AND G.TRXDATE <= @fechaHasta
       AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (@cuentaContrapartida1, @cuentaContrapartida2)
+      AND A.ACCATNUM <> @accatnumBancos
       ${noAnuladaWhere}
   `);
   const totalCount = count.recordset[0].total;
@@ -116,6 +128,7 @@ const getComprasPorSucursal = async ({ fechaDesde, fechaHasta, sucursalRestringi
         AND G.TRXDATE >= @fechaDesde
         AND G.TRXDATE <= @fechaHasta
         AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (@cuentaContrapartida1, @cuentaContrapartida2)
+        AND A.ACCATNUM <> @accatnumBancos
         ${noAnuladaWhere}
       ORDER BY Sucursal ASC, G.TRXDATE ASC
     `),

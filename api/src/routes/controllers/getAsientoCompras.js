@@ -34,20 +34,22 @@ const getAsientoCompras = async ({ fechaDesde, fechaHasta /* , sucursal */ }) =>
   };
 
   // Se excluyen también los comprobantes VOIDED y, a pedido del usuario (mismo criterio
-  // que Libro IVA Digital / Compras por sucursal), los DOCTYPE 3 (Cargo misceláneo) y 4
-  // (Devolución) - son ajustes internos, no compras reales.
+  // que Libro IVA Digital / Compras por sucursal), los DOCTYPE 3 (Cargo misceláneo), 4
+  // (Devolución) y 6 (Pago) - son ajustes internos o pagos, no compras reales. Se excluye
+  // el comprobante ENTERO (todas sus líneas) en los tres casos, así el asiento sigue
+  // cerrando (Debe = Haber) - nunca se excluye una línea suelta dentro de un comprobante.
   const noAnuladaWhere = `
     AND NOT EXISTS (
       SELECT 1 FROM PM30200 P
       WHERE LTRIM(RTRIM(P.DOCNUMBR)) = LTRIM(RTRIM(G.ORDOCNUM))
         AND LTRIM(RTRIM(P.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
-        AND (P.VOIDED = 1 OR P.DOCTYPE IN (3, 4))
+        AND (P.VOIDED = 1 OR P.DOCTYPE IN (3, 4, 6))
     )
     AND NOT EXISTS (
       SELECT 1 FROM PM20000 P
       WHERE LTRIM(RTRIM(P.DOCNUMBR)) = LTRIM(RTRIM(G.ORDOCNUM))
         AND LTRIM(RTRIM(P.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
-        AND (P.VOIDED = 1 OR P.DOCTYPE IN (3, 4))
+        AND (P.VOIDED = 1 OR P.DOCTYPE IN (3, 4, 6))
     )
   `;
 

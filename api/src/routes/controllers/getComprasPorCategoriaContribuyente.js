@@ -7,10 +7,12 @@ const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
 // G.ORMSTRID, que ya trae el VENDORID en la línea de asiento, contra
 // DYNAMICS..AWLI40330 para RESPBLE).
 //
-// Se excluyen las mismas dos cosas que en Compras por sucursal (confirmado contra
-// PRD08): las cuentas que funcionan como contrapartida de pago (211101 "AV.-PROVEEDORES
-// VARIOS" y 223202 "Visa Frances a Pagar" - no son una compra en sí) y las cuentas de
-// impuestos (ACCATNUM=9: IVA Crédito Fiscal y percepciones).
+// Se excluyen las mismas cosas que en Compras por sucursal (confirmado contra PRD08):
+// las cuentas que funcionan como contrapartida de pago (211101 "AV.-PROVEEDORES VARIOS",
+// 223202 "Visa Frances a Pagar", y por categoría TODO ACCATNUM=22 "Bancos" - GP puede
+// asentar una factura pagada "en el mismo documento" contra cualquiera de los tres según
+// el medio de pago usado, no son una compra en sí) y las cuentas de impuestos
+// (ACCATNUM=9: IVA Crédito Fiscal y percepciones).
 // Igual que en Gastos/Compras: GL20000.VOIDED no sirve (siempre da 0), se cruza contra
 // PM30200/PM20000.VOIDED=1 por DOCNUMBR+VENDORID.
 //
@@ -33,6 +35,7 @@ const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
 const MONEDA_VACIA = 'En Blanco';
 const CUENTAS_CONTRAPARTIDA = ['211101-01-000', '223202-01-000'];
 const ACCATNUM_IMPUESTOS = 9;
+const ACCATNUM_BANCOS = 22;
 const MAX_ROWS = 100000;
 const TAXDTLID_GRAVADO = ['IVACF 10.5%', 'IVACF 21%', 'IVACF 27%'];
 const TAXDTLID_NO_GRAVADO = ['IVACF 0% NOGRAV', 'IVACF 0% EXE'];
@@ -50,24 +53,25 @@ const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta }) =
     request.input('cuentaContrapartida1', sql.VarChar(75), CUENTAS_CONTRAPARTIDA[0]);
     request.input('cuentaContrapartida2', sql.VarChar(75), CUENTAS_CONTRAPARTIDA[1]);
     request.input('accatnumImpuestos', sql.Int, ACCATNUM_IMPUESTOS);
+    request.input('accatnumBancos', sql.Int, ACCATNUM_BANCOS);
     return request;
   };
 
   // Se excluyen también los comprobantes VOIDED y, a pedido del usuario (mismo criterio
-  // que Libro IVA Digital / Compras por sucursal), los DOCTYPE 3 (Cargo misceláneo) y 4
-  // (Devolución) - son ajustes internos, no compras reales.
+  // que Libro IVA Digital / Compras por sucursal), los DOCTYPE 3 (Cargo misceláneo), 4
+  // (Devolución) y 6 (Pago) - son ajustes internos o pagos, no compras reales.
   const noAnuladaWhere = `
     AND NOT EXISTS (
       SELECT 1 FROM PM30200 P
       WHERE LTRIM(RTRIM(P.DOCNUMBR)) = LTRIM(RTRIM(G.ORDOCNUM))
         AND LTRIM(RTRIM(P.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
-        AND (P.VOIDED = 1 OR P.DOCTYPE IN (3, 4))
+        AND (P.VOIDED = 1 OR P.DOCTYPE IN (3, 4, 6))
     )
     AND NOT EXISTS (
       SELECT 1 FROM PM20000 P
       WHERE LTRIM(RTRIM(P.DOCNUMBR)) = LTRIM(RTRIM(G.ORDOCNUM))
         AND LTRIM(RTRIM(P.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
-        AND (P.VOIDED = 1 OR P.DOCTYPE IN (3, 4))
+        AND (P.VOIDED = 1 OR P.DOCTYPE IN (3, 4, 6))
     )
   `;
 
@@ -83,6 +87,7 @@ const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta }) =
       AND G.TRXDATE <= @fechaHasta
       AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (@cuentaContrapartida1, @cuentaContrapartida2)
       AND A.ACCATNUM <> @accatnumImpuestos
+      AND A.ACCATNUM <> @accatnumBancos
       ${noAnuladaWhere}
   `);
   const totalCount = count.recordset[0].total;
@@ -120,6 +125,7 @@ const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta }) =
       AND G.TRXDATE <= @fechaHasta
       AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (@cuentaContrapartida1, @cuentaContrapartida2)
       AND A.ACCATNUM <> @accatnumImpuestos
+      AND A.ACCATNUM <> @accatnumBancos
       ${noAnuladaWhere}
     ORDER BY Categoria ASC
   `);

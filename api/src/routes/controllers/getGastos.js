@@ -76,22 +76,22 @@ const getGastos = async ({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, emp
   // comprobante + proveedor para poder sacar las anuladas de acá también.
   //
   // También se excluyen, a pedido del usuario (mismo criterio que Libro IVA Digital /
-  // Compras por sucursal), los DOCTYPE 3 (Cargo misceláneo) y 4 (Devolución) - ajustes
-  // internos, no compras reales. Solo afecta al grupo "compras" (SOURCDOC PMTRX/PMVVR) en
-  // la práctica: es el único que puede tener match de ORDOCNUM+ORMSTRID contra
-  // PM30200/PM20000 - ventas/recibos/pagos/financiero no comparten esa numeración.
+  // Compras por sucursal), los DOCTYPE 3 (Cargo misceláneo), 4 (Devolución) y 6 (Pago) -
+  // ajustes internos o pagos, no compras reales. Solo afecta al grupo "compras" (SOURCDOC
+  // PMTRX/PMVVR) en la práctica: es el único que puede tener match de ORDOCNUM+ORMSTRID
+  // contra PM30200/PM20000 - ventas/recibos/pagos/financiero no comparten esa numeración.
   const noAnuladaWhere = `
     AND NOT EXISTS (
       SELECT 1 FROM PM30200 P
       WHERE LTRIM(RTRIM(P.DOCNUMBR)) = LTRIM(RTRIM(G.ORDOCNUM))
         AND LTRIM(RTRIM(P.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
-        AND (P.VOIDED = 1 OR P.DOCTYPE IN (3, 4))
+        AND (P.VOIDED = 1 OR P.DOCTYPE IN (3, 4, 6))
     )
     AND NOT EXISTS (
       SELECT 1 FROM PM20000 P
       WHERE LTRIM(RTRIM(P.DOCNUMBR)) = LTRIM(RTRIM(G.ORDOCNUM))
         AND LTRIM(RTRIM(P.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
-        AND (P.VOIDED = 1 OR P.DOCTYPE IN (3, 4))
+        AND (P.VOIDED = 1 OR P.DOCTYPE IN (3, 4, 6))
     )
   `;
 
