@@ -48,18 +48,22 @@ const getComprasPorSucursal = async ({ fechaDesde, fechaHasta, sucursalRestringi
     return request;
   };
 
+  // Se excluyen también los comprobantes VOIDED y, a pedido del usuario (mismo criterio
+  // que Libro IVA Digital), los DOCTYPE 3 (Cargo misceláneo) y 4 (Devolución) - son
+  // ajustes internos, no compras reales. El listado crudo "Compras" (getCompras.js) queda
+  // afuera de este cambio a propósito - ahí sí se quieren ver esos comprobantes.
   const noAnuladaWhere = `
     AND NOT EXISTS (
       SELECT 1 FROM PM30200 P
       WHERE LTRIM(RTRIM(P.DOCNUMBR)) = LTRIM(RTRIM(G.ORDOCNUM))
         AND LTRIM(RTRIM(P.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
-        AND P.VOIDED = 1
+        AND (P.VOIDED = 1 OR P.DOCTYPE IN (3, 4))
     )
     AND NOT EXISTS (
       SELECT 1 FROM PM20000 P
       WHERE LTRIM(RTRIM(P.DOCNUMBR)) = LTRIM(RTRIM(G.ORDOCNUM))
         AND LTRIM(RTRIM(P.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
-        AND P.VOIDED = 1
+        AND (P.VOIDED = 1 OR P.DOCTYPE IN (3, 4))
     )
   `;
 

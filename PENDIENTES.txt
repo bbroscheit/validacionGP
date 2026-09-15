@@ -904,3 +904,29 @@ Libro IVA Digital (compras) - fecha contable y tipo de comprobante (2026-09-15)
 - Pendiente: no se toco fetchVentas (Ventas no tiene este problema reportado por el
   usuario en esta vuelta) ni ningun otro reporte que use DOCDATE para compras (Compras
   por sucursal, Gastos, etc.) - solo Libro IVA Digital, que es lo que se pidio.
+
+Cargo misceláneo / Devolucion excluidos de todos los reportes de Compras (2026-09-15)
+- A pedido del usuario, se extendio el mismo criterio de Libro IVA Digital (excluir
+  DOCTYPE 3 "Cargo misceláneo" y 4 "Devolucion" - son ajustes internos, no compras
+  reales) al resto de los reportes de Compras de la app: Compras por sucursal, Compras
+  por sucursal y cuenta, Asiento de compras, Compras por categoria y contribuyente, y el
+  grupo "compras" de Gastos.
+- Caso especial confirmado con el usuario: el listado crudo "Compras" (getCompras.js,
+  PM10000/PM20000/PM30200) queda EXPLICITAMENTE afuera de este cambio - ese reporte ya
+  tenia una logica deliberada distinta (Devolucion se muestra con signo negativo, no se
+  excluye nada salvo Pagos DOCTYPE=6) y el usuario pidio dejarlo asi para poder seguir
+  viendo esos comprobantes ahi como control.
+- Implementacion: en los reportes basados en GL20000 (todos excepto el listado crudo),
+  el bloque "noAnuladaWhere" que ya existia para sacar comprobantes VOIDED (cruzando por
+  DOCNUMBR+VENDORID contra PM30200/PM20000) se extendio para excluir tambien
+  DOCTYPE IN (3, 4) en la misma condicion, sin agregar joins nuevos. En Gastos.js el
+  mismo bloque es compartido por todos los grupos (ventas/recibos/pagos/financiero/
+  compras/otro) pero en la practica solo afecta a "compras" (SOURCDOC PMTRX/PMVVR) - es
+  el unico grupo cuyo ORDOCNUM+ORMSTRID puede matchear contra PM30200/PM20000.
+- Validado contra datos reales (PRD08), no HTTP: se confirmaron 4 comprobantes reales ya
+  identificados en la conversacion (3 Cargo misceláneo de "CONSORCIO PARQUE INDUSTRIAL
+  BB": 0001-00006928, 00001-6761, 00001-00006608; mas la Devolucion 200-1663117 de EDES
+  SA) - ninguno aparece en ninguno de los 5 reportes/grupos tocados (mayo-agosto 2026).
+  Asiento de compras sigue cerrando (Debe = Haber, diferencia ~0 por redondeo de punto
+  flotante).
+- Fuera de alcance (confirmado con el usuario): "Compras" (listado crudo) sin cambios.
