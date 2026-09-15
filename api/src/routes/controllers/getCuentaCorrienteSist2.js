@@ -1,5 +1,6 @@
 const { getGpPoolSist2, sql } = require('../../config/gpPool');
-const { resolverSucursalSist2, bindInList } = require('../../services/sist2Ventas');
+const { resolverSucursalSist2, bindInList, SIST2_SUCURSALES } = require('../../services/sist2Ventas');
+const { coincideSucursal } = require('../../services/autorizacion');
 
 // Reporte - Cuenta corriente de cliente (solo sist2)
 // Fuente: RM20101 (Receivables Management) tiene UNA fila por cada movimiento real que
@@ -270,11 +271,20 @@ const listadoClientes = async (pool, desde, hasta, sucursalFiltro, pendientes) =
   };
 };
 
-const getCuentaCorrienteSist2 = async ({ cliente, fechaDesde, fechaHasta, sucursal, pendientes }) => {
+const getCuentaCorrienteSist2 = async ({ cliente, fechaDesde, fechaHasta, sucursal, pendientes, sucursalRestringida = null }) => {
   const pool = await getGpPoolSist2();
   const desdeListado = fechaDesde ? new Date(fechaDesde) : null;
   const hastaListado = fechaHasta ? new Date(fechaHasta) : null;
-  const sucursalFiltro = sucursal && sucursal.trim() ? sucursal.trim() : null;
+  // Acceso restringido por sucursal (services/autorizacion.js): se fuerza el filtro a la
+  // sucursal del usuario, ignorando lo que haya pedido el cliente (el dropdown del
+  // frontend queda deshabilitado para estos usuarios, pero igual se refuerza acá). Se
+  // busca cuál de las sucursales conocidas de sist2 coincide con el valor de AD (formato
+  // libre) para reusar el mismo filtro exacto que ya usa resolverMontosPorSucursal - si
+  // ninguna coincide, se fuerza un valor que no matchea nada (no se le muestra todo por
+  // las dudas).
+  const sucursalFiltro = sucursalRestringida
+    ? (SIST2_SUCURSALES.find((s) => coincideSucursal(s, sucursalRestringida)) || '__SIN_ACCESO__')
+    : (sucursal && sucursal.trim() ? sucursal.trim() : null);
   const pendientesBool = pendientes === true || pendientes === 'true';
 
   if (!cliente || !cliente.trim()) {

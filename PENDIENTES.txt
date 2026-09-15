@@ -556,6 +556,85 @@ PENDIENTE
   + inspeccion de xl/styles.xml y sheet2.xml): confirmado fill FFBFDBFE en Saldo final,
   fila separadora con fillId=0/borderId=0 (sin estilo), y fechas cortas tipo "3/7/2026".
 
+[2026-09-11] Login contra Active Directory (basani.local)
+- Antes la app no tenia ningun tipo de autenticacion - cualquiera con la URL de la API
+  podia pegarle a los reportes. Se agrego login por bind LDAP directo contra el AD
+  (sin cuenta de servicio): el usuario tipea su usuario/clave de dominio, el backend hace
+  bind con userPrincipalName (usuario@basani.local) contra los 2 DCs confirmados por LDAP
+  anonimo (DC1-BA=172.19.31.15, DC2-BA=172.19.31.12, defaultNamingContext=DC=basani,DC=local) -
+  si el primero esta caido prueba el segundo. Decision del usuario: cualquier usuario
+  valido del dominio puede entrar (no se restringio por grupo de AD).
+- api/src/services/adAuth.js (ldapjs), api/src/middlewares/requireAuth.js (valida cookie
+  JWT), api/src/routes/authRouter.js (POST /auth/login, POST /auth/logout, GET /auth/me).
+  api/src/app.js: /auth queda sin proteger, TODO lo demas (/, validacionRouter) pasa por
+  requireAuth. Se saco el CORS "*" (incompatible con cookies) y se reemplazo por
+  cors({origin: CORS_ORIGIN, credentials:true}) usando el env var real.
+- Sesion: cookie httpOnly con JWT, 12hs, firmada con JWT_SECRET (generado al azar, en
+  .env). COOKIE_SECURE=false por defecto (server HTTP simple, LAN interna) - poner "true"
+  solo si el server pasa a servir HTTPS.
+- Frontend: client/pages/login.js (form), client/pages/_app.js (guard: chequea /auth/me
+  al cargar cualquier pagina, redirige a /login si no hay sesion), Nav.js muestra el
+  nombre del usuario logueado + boton "Cerrar sesion". Como el front y la API corren en
+  puertos distintos, las cookies no viajan con fetch() por defecto - se creo
+  client/functions/apiFetch.js (wrapper con credentials:"include") y se migraron los 32
+  fetch() a la API en 24 paginas/componentes con un script (fetch(`${...API_URL}` ->
+  apiFetch(`${...API_URL}`, mas el import agregado en cada archivo).
+- Nuevas dependencias: ldapjs y jsonwebtoken en api/package.json.
+- Validado end-to-end con Puppeteer + Chrome real (sin credenciales validas propias, no
+  correspondia pedirlas): visitar "/" sin sesion redirige a /login, visitar directo una
+  pagina de reporte tambien redirige, y un login con usuario/clave inventados pega de
+  verdad contra el AD real y muestra "Usuario o contraseña incorrectos" (confirma bind
+  LDAP + CORS con credentials + cookie funcionando de punta a punta). Falta que el
+  usuario prueba el login con sus credenciales reales.
+- PENDIENTE PARA EL DEPLOY (no lo puedo hacer yo, no conozco esos datos):
+  1) correr "npm install" en api/ (ldapjs y jsonwebtoken son nuevos).
+  2) completar en el .env del servidor: AD_DOMAIN, AD_BASE_DN, AD_SERVERS, AD_PORT,
+     JWT_SECRET (generar uno propio, no reusar el de este .env local),
+     CORS_ORIGIN (la URL REAL desde donde se sirve el frontend en el servidor - si no
+     coincide exacto, el login va a fallar silenciosamente por CORS), COOKIE_SECURE.
+
+[2026-09-11] Fix: login exitoso no redirigia
+- Bug: client/pages/_app.js solo chequea /auth/me una vez al montar la app (useEffect
+  con deps []). Login.js hacia router.replace("/") tras un login exitoso, pero como es
+  navegacion interna (SPA, sin remount de _app), el estado "sesion" seguia en false
+  (nunca se habia vuelto a chequear) y el guard de _app rebotaba de inmediato de vuelta a
+  /login - el usuario veia el 200 de /auth/login en la consola pero nunca se movia de la
+  pantalla.
+- Fix: login.js ahora hace window.location.href = "/" en vez de router.replace("/") -
+  fuerza una recarga completa, _app.js se remonta y el chequeo de sesion corre de nuevo
+  ya con la cookie puesta.
+- Validado de nuevo (con Chrome real vía Puppeteer, puertos 3011/3012 para no pisar el
+  proceso que ya esta corriendo en el 3000 de este equipo) que el flujo de credenciales
+  invalidas sigue funcionando igual que antes. Sigue sin poder probarse el camino de
+  login EXITOSO end-to-end porque requiere credenciales reales de AD.
+
+[2026-09-11] Diagnostico temporal: ver todos los atributos que trae AD (buscar sucursal)
+- adAuth.js: buscarDatosUsuario ahora pide "attributes: []" (todos los atributos del
+  usuario, estandar LDAP - antes solo pedia displayName/sAMAccountName). Se devuelven
+  crudos como atributosAD junto con usuario/nombre.
+- authRouter.js: el JWT/cookie de sesion sigue llevando SOLO usuario+nombre (no se
+  guarda atributosAD ahi) - atributosAD viaja una unica vez en la respuesta JSON de
+  POST /auth/login, solo para diagnostico.
+- login.js: tras un login exitoso ya NO redirige automatico - muestra los atributosAD
+  en pantalla (JSON.stringify) y los tira por console.log, con un boton "Continuar" para
+  seguir a la app cuando se termine de mirar. Es una pantalla temporal, sacar despues de
+  identificar el campo de sucursal (candidatos tipicos: physicalDeliveryOfficeName,
+  department, company, l, st, o algun atributo custom del esquema de basani.local).
+- No se pudo validar con datos reales (necesita credenciales validas del usuario) - se
+  confirmo que la busqueda anonima NO funciona (como se espera en AD, la subtree search
+  requiere estar autenticado) asi que no sirve para probarlo sin login real.
+
+[2026-09-11] Se define department/company como los campos utiles de AD - se saca el diagnostico
+- Confirmado con el usuario: de todos los atributos de AD, sirven "department" y
+  "company" (probablemente sucursal/empresa). Se saco la pantalla de diagnostico de
+  login.js (volvio al redirect automatico de siempre) y se dejo de pedir "attributes: []"
+  (todos) en adAuth.js - ahora pide puntualmente displayName, sAMAccountName, department,
+  company.
+- department y company quedan en la sesion (JWT/cookie + GET /auth/me) junto con
+  usuario/nombre, disponibles en toda la app via el estado que ya maneja _app.js. Por
+  ahora solo se capturan - no se cableo todavia ninguna logica de filtrado/uso con esos
+  valores (eso queda para cuando el usuario pida el proximo paso concreto).
+
 [2026-09-14] Fix: anchos incorrectos en los .txt de Libro IVA Digital (compras y ventas)
 - Reporte del usuario: Compras esperaba 325 y recibia 328, Ventas esperaba 266 y recibia
   257 (esos numeros ya venian de la propia especificacion de ARCA, el usuario los tenia
@@ -599,11 +678,199 @@ PENDIENTE
   607/614 (98.9%) - los 7 restantes NO son bugs de codigo:
     - 6 son Facturas C (monotributista, no discrimina IVA) - GP no genera NINGUNA fila
       en AWLI_IMPUESTOS para estas, entonces el importe total no tiene donde
-      reflejarse en el archivo actual.
+      reflejarse en el archivo actual. Pendiente definir con el usuario si van todas a
+      "No Gravado" o a otro campo - no se adivino, queda para la proxima.
     - 2 son Facturas A con diferencia chica/grande que no cuadra ni sumando todo lo que
       trae AWLI_IMPUESTOS (comprobante 0019-00002737, $0.64 de diferencia - redondeo
       menor; comprobante 0011-00037825, $62.092,40 de diferencia - esto no es
-      redondeo, parece un problema de carga en GP para ese comprobante puntual).
-  DECISION DEL USUARIO: no tocar nada de esto en el codigo - si falta un impuesto o hay
-  un error de redondeo, es un error de carga en GP y lo tienen que corregir ellos ahi,
-  no maquillarlo desde el generador del txt.
+      redondeo, parece un problema de carga en GP para ese comprobante puntual, a
+      revisar a mano).
+
+[2026-09-14] Restriccion de acceso por sucursal (a partir del atributo AD "o"/Organization)
+- Aclaracion del usuario: el dato clave para autorizacion NO es department ni company
+  (los que ya se capturaban) sino "o" (Organization, atributo LDAP estandar) - se agrego
+  a adAuth.js/authRouter.js/JWT/sesion.
+- Regla: organizacion="Ecobahia" (o vacio - fail-open a proposito, ver comentario en
+  autorizacion.js) = acceso completo, igual que antes. Cualquier otro valor (ej.
+  "La Pampa") = acceso restringido a esa sucursal (Ventas) / zona (Compras/Gastos).
+  Decision del usuario: se aplica a TODA la app, no solo a los 2 reportes que menciono
+  originalmente - y las operaciones sin sucursal/zona catalogada ("En Blanco") quedan
+  ocultas para usuarios restringidos.
+- api/src/services/autorizacion.js (nuevo): sucursalDeSesion(), coincideSucursal()
+  (normaliza tildes/mayusculas y compara por substring en ambos sentidos - cubre casos
+  como sist2 "Casa Central" vs Ecobahia "CENTRAL" para el mismo lugar, validado con
+  datos reales).
+- api/src/middlewares/requireAuth.js: ahora calcula req.sucursalRestringida (null =
+  acceso completo) ademas de validar la cookie.
+- api/src/middlewares/bloquearSiRestringido.js (nuevo): 403 para reportes sin dimension
+  de sucursal/zona confiable para filtrar.
+- FILTRADOS (reciben sucursalRestringida y descartan lo que no coincide, tanto en `base`
+  como en `rows` - el Excel tampoco puede filtrarse esquivando el filtro):
+  getVentasPorSucursal, getVentasPorSucursalCuenta, getAsientoVentas (Ecobahia+sist2),
+  getComprasPorSucursal, getComprasPorSucursalCuenta (Ecobahia), getGastos (Zona,
+  Ecobahia - sist2 no tiene esa Contabilidad Analitica, queda vacio para sist2 con
+  usuario restringido), getCobranzasSist2, getCuentaCorrienteSist2 (fuerza el filtro de
+  sucursal server-side, ignora lo que pida el cliente - ver nota frontend abajo).
+- BLOQUEADOS (403) para usuarios restringidos: /ventas y /compras (bases, sin sucursal
+  confiable), /opb, /reportes/ventas-por-provincia (provincia != sucursal),
+  /reportes/ventas-categoria-contribuyente, /reportes/compras-categoria-contribuyente,
+  /reportes/asiento-compras (filtro de sucursal deshabilitado ahi desde antes),
+  /reportes/libro-iva-digital/* (es de toda la empresa por naturaleza, se presenta a
+  nivel CUIT).
+- SIN CAMBIOS (bajo riesgo, solo nombres): /reportes/sucursales-ventas,
+  /reportes/sucursales-compras, /reportes/sist2/clientes (busqueda de clientes - devuelve
+  nombre+codigo de TODOS los clientes, no datos financieros), PUT/DELETE
+  /overrides/clasificacion (edicion de clasificacion Sucursal/Provincia - no se restringio
+  quien puede editar que).
+- Frontend: NO se toco nada todavia - el manejo de errores ya existente en todas las
+  paginas (`if (!res.ok) throw new Error(json.message...)`) ya muestra el mensaje 403 en
+  rojo sin romper nada, confirmado. PENDIENTE (no armado en esta pasada): ocultar en el
+  Nav los links a reportes bloqueados para un usuario restringido, y deshabilitar/forzar
+  el dropdown de Sucursal en Cuenta Corriente sist2 (hoy el usuario restringido puede
+  elegir cualquier sucursal en el dropdown pero el backend igual fuerza la suya - no es
+  un problema de seguridad, es que la UI no refleja la restriccion).
+- Validado end-to-end con HTTP real (JWT firmado a mano con el JWT_SECRET real,
+  simulando login sin usar credenciales de nadie): usuario organizacion="La Pampa" ve
+  SOLO LA PAMPA en Ventas por sucursal (monto exacto igual a la fila "LA PAMPA" del
+  reporte sin restringir), 403 en las rutas bloqueadas; usuario organizacion="Ecobahia"
+  sigue viendo todo sin cambios (regresion OK).
+
+[2026-09-14] Bug reportado: usuario MazzaRN (deberia ser solo Bahia Blanca) ve todo
+- Se descarto que sea cookie vieja o API sin reiniciar (usuario confirmo que hizo las
+  dos cosas). Hipotesis: el atributo "o" (Organization) puede no estar cargado para
+  este usuario en particular, o la sucursal esta en otro campo distinto para ella
+  (carga inconsistente entre usuarios en AD).
+- Se reactivo temporalmente el diagnostico completo (mismo mecanismo que se uso para
+  encontrar department/company/o la primera vez): adAuth.js vuelve a pedir
+  "attributes: []" (todos), login.js muestra o/department/company destacados arriba +
+  el volcado completo de atributos, sin redirigir automatico. El JWT/cookie de sesion
+  sigue liviano (no lleva atributosAD, solo diagnostico en la respuesta del login).
+- PENDIENTE: que MazzaRN se loguee de nuevo y el usuario me pase que campo tiene
+  realmente "Bahia Blanca" cargado para ajustar autorizacion.js/adAuth.js si no es "o".
+
+[2026-09-14] Fix: la sucursal esta en "company", no en "o"
+- Confirmado con datos reales de MazzaRN: company="bahia blanca" (o estaba vacio para
+  ella, por eso caia en el fail-open y veia todo). Se cambio autorizacion.js/adAuth.js
+  para usar company como fuente principal, con o como respaldo (company || o) por si
+  algun usuario lo tiene cargado al reves.
+- Se saco el diagnostico completo de login.js (volvio al redirect automatico normal) y
+  adAuth.js volvio a pedir solo los 5 campos puntuales (ya no "attributes: []").
+- Validado: coincideSucursal('BAHIA BLANCA', 'bahia blanca') da true (la normalizacion
+  de mayusculas ya cubria este caso sin cambios), y getVentasPorSucursal con
+  sucursalRestringida='bahia blanca' devuelve SOLO Bahia Blanca. Build de Next.js OK.
+
+[2026-09-14] Fix: Ventas por sucursal y cuenta / Asiento de ventas ignoraban los overrides manuales
+- Reporte del usuario: con MazzaRN (restringida a Bahia Blanca), "Ventas por sucursal"
+  daba 279.249.288,31 pero "Ventas por sucursal y cuenta" y "Asiento de ventas" daban
+  278.288.038,31 (diferencia $961.250).
+- Causa: 3 comprobantes de agosto/2026 (NDPA0040-00000004, NCPA0040-00000223,
+  FVPA0040-00002779) tienen PHONE3 en blanco en GP, corregido a mano con un override
+  manual a "BAHIA BLANCA" (clasificacionOverrides.js/Postgres). "Ventas por sucursal"
+  SI aplica esos overrides (se conecto cuando se armo esa feature), pero
+  "Ventas por sucursal y cuenta" y "Asiento de ventas" NUNCA los aplicaron - quedaban
+  "En Blanco" en esos reportes, invisibles para el usuario restringido. Para un usuario
+  Ecobahia (acceso completo) esto no se notaba porque "En Blanco" tambien se muestra.
+- De yapa se encontro el mismo problema en el filtro OPCIONAL de sucursal (el dropdown
+  de Asiento de Ventas, para usuarios SIN restriccion): filtraba con
+  "H.PHONE3 = @sucursal" en SQL, que tampoco veia los overrides. Se cambio para que el
+  filtro (tanto el dropdown opcional como el acceso restringido) se resuelva siempre en
+  JS con la sucursal ya resuelta CON overrides (mismo patron que ya usaba sist2, que
+  nunca filtraba en SQL por no tener una sola columna de sucursal).
+- Fix en getVentasPorSucursalCuenta.js y getAsientoVentas.js: se agrego
+  getOverridesMap(tipo:'sucursal') y se usa (override || sucursalCalculada) igual que en
+  getVentasPorSucursal.js.
+- Validado con datos reales (agosto/2026, Bahia Blanca restringido): los 3 reportes
+  ahora dan EXACTO 279.249.288,31 (antes 278.288.038,31 en los dos GL-based). Tambien
+  validado que el dropdown opcional (usuario sin restriccion, sucursal=BAHIA BLANCA)
+  ahora tambien da el total correcto, y que el total SIN filtrar de toda la empresa no
+  cambio (Debe=Haber sigue cerrando exacto).
+
+[2026-09-14] Los usuarios Ecobahia (acceso completo) ya pueden asignar Zona en Compras
+- Pedido del usuario: igual que en Ventas, los usuarios con company="Ecobahia" tienen
+  que poder asignar sucursal/zona a los comprobantes "En Blanco" de Compras y que quede
+  guardado - se va a repetir seguido (Contabilidad Analitica no siempre tiene la
+  dimension ZONA cargada en el asiento).
+- Se reutilizo el mismo mecanismo de overrides que ya existia para Ventas
+  (clasificacionOverrides.js/Postgres), con un tipo nuevo "zona" (separado de
+  "sucursal"/"provincia" que usa Ventas, mismo modelo/tabla) - se agrego "zona" a la
+  lista blanca de tipos validos en overridesClasificacion.js (antes solo aceptaba
+  sucursal/provincia, hubiera rechazado el guardado).
+- getComprasPorSucursal.js: aplica el override (o la zona calculada) igual que Ventas,
+  agrega Editado, y ahora tambien trae Fecha/Proveedor/NombreProveedor por comprobante
+  (antes no estaban - necesarios para el modal de edicion). Se junta PM00200 por
+  G.ORMSTRID para el nombre del proveedor.
+- getComprasPorSucursalCuenta.js: aplica el mismo override en modo solo-lectura (igual
+  patron que Ventas por sucursal y cuenta - la edicion vive en el reporte "por
+  sucursal", este solo tiene que respetarla para no volver a mostrar "En Blanco" ahi).
+- Frontend: client/components/DocumentosClasificacionModal.js gano un prop
+  "entidadLabel" (default "Cliente") para poder decir "Proveedor" en Compras sin
+  duplicar el componente - la fila interna sigue usando Cliente/NombreCliente. Se
+  reemplazo el modal a medida (solo lectura) que tenia compras-por-sucursal.js por el
+  componente compartido, con edicion/revertir igual que Ventas.
+- Bug encontrado y corregido en el camino: overridesClasificacion.js (controller de
+  PUT/DELETE) tenia una lista blanca de tipo hardcodeada en ['sucursal', 'provincia'] -
+  sin el fix de arriba, cualquier intento de guardar un override de zona hubiera fallado
+  con "tipo invalido: zona".
+- Validado end-to-end por HTTP real (PUT -> aparece en Compras por sucursal Y en
+  Compras por sucursal y cuenta con el mismo valor -> DELETE revierte a "En Blanco" en
+  los dos). Build de Next.js OK.
+- Fuera de alcance por ahora (no pedido): Gastos (usa la misma columna Zona pero es un
+  reporte distinto, no se le agrego edicion), Compras por categoria y contribuyente
+  (bloqueado para usuarios restringidos, no tiene dimension de zona para poder editar).
+
+Cobranzas por sucursal (sist2) - la misma edicion de sucursal en blanco (2026-09-14)
+- El usuario reporto que en "Cobranzas por sucursal" tambien hay varios recibos "En
+  Blanco" y los usuarios con acceso completo (Ecobahia) no podian asignarles sucursal
+  como ya podian en Ventas y Compras.
+- Mismo mecanismo de overrides otra vez, con un tipo nuevo "sucursal_recibo" (agregado a
+  la lista blanca de overridesClasificacion.js). No se reutilizo el tipo "sucursal" que
+  ya usa Ventas (incluido sist2) a proposito: ahi el comprobante es un numero de Recibo
+  (GL20000.ORDOCNUM, SOURCDOC CRJ/RMJ), un espacio de numeracion de GP distinto al de las
+  facturas de Ventas - mezclarlos en el mismo tipo hubiera arriesgado que un recibo y una
+  factura con el mismo numero se pisen el override entre si.
+- getCobranzasSist2.js: cada Recibo puede generar varias filas en "base" (una por cada
+  Factura a la que esta aplicado, "Origen: Documento", mas una fila residual "Origen:
+  Cliente" si queda algo sin aplicar/resuelto). El override se aplica por Recibo, pisando
+  la Sucursal de TODAS sus filas por igual (se asume que un recibo, como documento fisico,
+  pertenece a una sola sucursal) - se agrego el campo Editado.
+- Frontend (client/pages/reportes/sist2/cobranzas.js): se agrego el click en una sucursal
+  para abrir el modal compartido (DocumentosClasificacionModal), agrupando las lineas de
+  "base" por Recibo (sumando su Monto en Neto, no hay Impuestos separados en este reporte)
+  para armar un documento por recibo igual que en Ventas/Compras. Se refactorizo buscar()
+  en ejecutarBusqueda() para poder recargar despues de guardar/revertir.
+- Validado end-to-end contra datos reales (no HTTP esta vez, directo contra el
+  controller): confirmados 51 recibos "En Blanco" en el periodo probado -> se asigno
+  "BAHIA BLANCA" a uno de ellos via upsertOverride -> aparecio correctamente movido al
+  grupo BAHIA BLANCA con Editado:true -> deleteOverride -> volvio a "En Blanco" limpio.
+  Build de Next.js OK.
+- Fuera de alcance por ahora (no pedido): no se toco getCuentaCorrienteSist2.js ni
+  getVentasPorSucursal.js (sist2) - siguen usando el tipo "sucursal" propio de facturas,
+  sin relacion con este cambio.
+
+Gate de acceso al login por lista blanca de companias (2026-09-15)
+- A pedido del usuario: mientras se van agregando sucursales de a una en AD, solo pueden
+  ENTRAR a la app los usuarios con "company" en Ecobahia, Tandil, La Pampa, Bahia Blanca,
+  Mar Del Plata o Puerto Madryn, mas broscheitcb (el usuario del desarrollador) siempre,
+  sin importar su company. Todos los demas quedan afuera del login (403), no solo con
+  vista restringida como los usuarios de sucursal.
+- Distinto del "esAccesoCompleto" que ya existia en autorizacion.js: ese decide que ve
+  alguien que YA entro (y trata vacio como acceso completo, fail-open, a proposito). Este
+  gate nuevo es previo, decide quien entra, y es fail-closed a proposito: vacio/company no
+  cargado NO entra (antes del pedido de hoy, un usuario sin company cargado entraba con
+  acceso completo - ahora, hasta que le carguen la sucursal en AD, no entra directamente).
+- Se agrego tieneAccesoALaApp(usuario, organizacion) en autorizacion.js (lista blanca
+  ORGANIZACIONES_CON_ACCESO, comparada con el mismo normalizado de tildes/mayusculas que
+  ya usa coincideSucursal, pero con igualdad exacta - no substring, para no ser laxo en
+  el gate de login) y se lo engancho en authRouter.js /login: si autenticarUsuarioAD
+  confirma la contraseña pero tieneAccesoALaApp da false, responde 403 sin poner la
+  cookie de sesion (el mensaje ya lo muestra login.js, que maneja !res.ok mostrando
+  json.message sin cambios).
+- Probado con casos reales via script (mismos valores de "company" que se vieron en AD
+  durante el feature de sucursales: "bahia blanca" en minuscula, con tilde "Bahía
+  Blanca", vacio, null, "Cordoba" como no-permitido, broscheitcb con y sin company, y las
+  6 companias permitidas en distintas capitalizaciones) - todos se comportaron como se
+  esperaba.
+- Pendiente/a tener en cuenta: la sesion (JWT) dura 12hs y no se re-valida contra este
+  gate hasta que expire - si a alguien le sacan el acceso mientras tiene sesion activa,
+  sigue entrando hasta que la sesion vence. Mismo comportamiento que ya tenia el resto de
+  la autorizacion, no se cambio.

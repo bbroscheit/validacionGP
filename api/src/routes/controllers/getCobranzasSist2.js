@@ -1,5 +1,7 @@
 const { getGpPoolSist2, sql } = require('../../config/gpPool');
 const { resolverSucursalSist2, bindInList } = require('../../services/sist2Ventas');
+const { coincideSucursal } = require('../../services/autorizacion');
+const { getOverridesMap } = require('../../services/clasificacionOverrides');
 
 // Reporte - Cobranzas por sucursal (solo sist2)
 // Los recibos (GL20000, SOURCDOC IN ('CRJ','RMJ'), igual clasificación que usa
@@ -27,11 +29,14 @@ const { resolverSucursalSist2, bindInList } = require('../../services/sist2Venta
 // factura, incluida cualquier diferencia por descuentos de pronto pago tomados en la
 // aplicación, cae íntegro en MontoCliente - así el total general siempre cierra exacto
 // contra la suma de recibos del período, sin inventar precisión que no hay).
+// Corrección manual (mismo mecanismo que Ventas/Compras, tipo "sucursal_recibo"): pisa la
+// Sucursal calculada de TODAS las líneas de un mismo Recibo (tanto "Documento" como
+// "Cliente"), para los usuarios con acceso completo (Ecobahia).
 const CUENTA_DEUDORES = '113110-01-000';
 const MAX_ROWS = 100000;
 const MONEDA_VACIA = 'En Blanco';
 
-const getCobranzasSist2 = async ({ fechaDesde, fechaHasta }) => {
+const getCobranzasSist2 = async ({ fechaDesde, fechaHasta, sucursalRestringida = null }) => {
   if (!fechaDesde || !fechaHasta) {
     throw new Error('fechaDesde y fechaHasta son requeridos');
   }
@@ -56,26 +61,29 @@ const getCobranzasSist2 = async ({ fechaDesde, fechaHasta }) => {
   recibosRequest.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
   recibosRequest.input('fechaHasta', sql.DateTime, new Date(fechaHasta));
   recibosRequest.input('cuentaDeudores', sql.VarChar(75), CUENTA_DEUDORES);
-  const recibosResult = await recibosRequest.query(`
-    SELECT TOP (${MAX_ROWS})
-      LTRIM(RTRIM(G.ORDOCNUM)) AS Recibo,
-      LTRIM(RTRIM(G.ORMSTRID)) AS ClienteRecibo,
-      MIN(G.TRXDATE) AS TRXDATE,
-      SUM(G.CRDTAMNT - G.DEBITAMT) AS Monto
-    FROM GL20000 AS G
-    INNER JOIN GL00105 AS N ON N.ACTINDX = G.ACTINDX
-    WHERE LTRIM(RTRIM(G.SOURCDOC)) IN ('CRJ', 'RMJ')
-      AND LTRIM(RTRIM(N.ACTNUMST)) = @cuentaDeudores
-      AND G.TRXDATE >= @fechaDesde AND G.TRXDATE <= @fechaHasta
-    GROUP BY LTRIM(RTRIM(G.ORDOCNUM)), LTRIM(RTRIM(G.ORMSTRID))
-    ORDER BY MIN(G.TRXDATE) ASC
-  `);
+  const [recibosResult, overridesMap] = await Promise.all([
+    recibosRequest.query(`
+      SELECT TOP (${MAX_ROWS})
+        LTRIM(RTRIM(G.ORDOCNUM)) AS Recibo,
+        LTRIM(RTRIM(G.ORMSTRID)) AS ClienteRecibo,
+        MIN(G.TRXDATE) AS TRXDATE,
+        SUM(G.CRDTAMNT - G.DEBITAMT) AS Monto
+      FROM GL20000 AS G
+      INNER JOIN GL00105 AS N ON N.ACTINDX = G.ACTINDX
+      WHERE LTRIM(RTRIM(G.SOURCDOC)) IN ('CRJ', 'RMJ')
+        AND LTRIM(RTRIM(N.ACTNUMST)) = @cuentaDeudores
+        AND G.TRXDATE >= @fechaDesde AND G.TRXDATE <= @fechaHasta
+      GROUP BY LTRIM(RTRIM(G.ORDOCNUM)), LTRIM(RTRIM(G.ORMSTRID))
+      ORDER BY MIN(G.TRXDATE) ASC
+    `),
+    getOverridesMap({ empresa: 'sist2', tipo: 'sucursal_recibo' }),
+  ]);
   const recibos = recibosResult.recordset;
 
   if (recibos.length === 0) {
     return {
       totalCount, truncated: totalCount > MAX_ROWS,
-      base: [], baseColumns: ['Sucursal', 'Origen', 'Recibo', 'Fecha', 'Cliente', 'ClienteNombre', 'Factura', 'Monto'],
+      base: [], baseColumns: ['Sucursal', 'Origen', 'Recibo', 'Fecha', 'Cliente', 'ClienteNombre', 'Factura', 'Editado', 'Monto'],
       rows: [], columns: ['Sucursal', 'MontoDocumento', 'MontoCliente', 'Total'],
       totalMontoDocumento: 0, totalMontoCliente: 0, totalGeneral: 0,
     };
@@ -138,6 +146,7 @@ const getCobranzasSist2 = async ({ fechaDesde, fechaHasta }) => {
 
   const base = [];
   recibos.forEach((recibo) => {
+    const override = overridesMap.get(recibo.Recibo);
     const lineas = applyLinesByRecibo.get(recibo.Recibo) || [];
     let sumAplicadoResuelto = 0;
     lineas.forEach((linea) => {
@@ -152,13 +161,14 @@ const getCobranzasSist2 = async ({ fechaDesde, fechaHasta }) => {
       if (!sucursal) return; // factura sin sucursal resoluble -> cae en el residual
       sumAplicadoResuelto += linea.APPTOAMT;
       base.push({
-        Sucursal: sucursal,
+        Sucursal: override || sucursal,
         Origen: 'Documento',
         Recibo: recibo.Recibo,
         Fecha: recibo.TRXDATE,
         Cliente: recibo.ClienteRecibo,
         ClienteNombre: clienteFactura ? clienteFactura.CUSTNAME : null,
         Factura: linea.Factura,
+        Editado: !!override,
         Monto: linea.APPTOAMT,
       });
     });
@@ -172,20 +182,25 @@ const getCobranzasSist2 = async ({ fechaDesde, fechaHasta }) => {
         clienteUserdef2: clienteRecibo ? clienteRecibo.USERDEF2 : null,
       }) || MONEDA_VACIA;
       base.push({
-        Sucursal: sucursalCliente,
+        Sucursal: override || sucursalCliente,
         Origen: 'Cliente',
         Recibo: recibo.Recibo,
         Fecha: recibo.TRXDATE,
         Cliente: recibo.ClienteRecibo,
         ClienteNombre: clienteRecibo ? clienteRecibo.CUSTNAME : null,
         Factura: null,
+        Editado: !!override,
         Monto: residual,
       });
     }
   });
 
+  const baseVisible = sucursalRestringida
+    ? base.filter((row) => coincideSucursal(row.Sucursal, sucursalRestringida))
+    : base;
+
   const agrupado = new Map();
-  base.forEach((row) => {
+  baseVisible.forEach((row) => {
     if (!agrupado.has(row.Sucursal)) {
       agrupado.set(row.Sucursal, { Sucursal: row.Sucursal, MontoDocumento: 0, MontoCliente: 0 });
     }
@@ -204,8 +219,8 @@ const getCobranzasSist2 = async ({ fechaDesde, fechaHasta }) => {
   return {
     totalCount,
     truncated: totalCount > MAX_ROWS,
-    base,
-    baseColumns: ['Sucursal', 'Origen', 'Recibo', 'Fecha', 'Cliente', 'ClienteNombre', 'Factura', 'Monto'],
+    base: baseVisible,
+    baseColumns: ['Sucursal', 'Origen', 'Recibo', 'Fecha', 'Cliente', 'ClienteNombre', 'Factura', 'Editado', 'Monto'],
     rows,
     columns: ['Sucursal', 'MontoDocumento', 'MontoCliente', 'Total'],
     totalMontoDocumento,

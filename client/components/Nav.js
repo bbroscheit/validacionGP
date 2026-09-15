@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
+import { apiFetch } from "@/functions/apiFetch";
 
 // Cada entrada es un desplegable de la barra. "Bases" son las consultas crudas contra
 // GP; los demás son reportes armados sobre esas bases (se va sumando un desplegable por
@@ -51,10 +52,18 @@ const menus = [
   },
 ];
 
-export default function Nav() {
+export default function Nav({ usuario, onLogout }) {
   const router = useRouter();
   const [abierto, setAbierto] = useState(null);
   const navRef = useRef(null);
+
+  const cerrarSesion = async () => {
+    try {
+      await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/logout`, { method: "POST" });
+    } finally {
+      onLogout?.();
+    }
+  };
 
   useEffect(() => {
     const cerrarSiEsAfuera = (e) => {
@@ -102,6 +111,13 @@ export default function Nav() {
             </div>
           );
         })}
+
+        <div className="ml-auto flex items-center gap-3 text-sm">
+          {usuario && <span className="opacity-80">{usuario.nombre}</span>}
+          <button onClick={cerrarSesion} className="opacity-80 hover:opacity-100 underline">
+            Cerrar sesión
+          </button>
+        </div>
       </div>
     </nav>
   );

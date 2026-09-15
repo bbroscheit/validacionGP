@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { exportToExcel, exportToExcelMultiHoja } from "@/functions/exportToExcel";
+import { apiFetch } from "@/functions/apiFetch";
 
 function formatMonto(n) {
   return (n ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -46,7 +47,7 @@ export default function ComprasPorSucursalCuenta() {
       params.set("fechaDesde", fechaDesde);
       params.set("fechaHasta", fechaHasta);
 
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/reportes/compras-por-sucursal-cuenta?${params.toString()}`);
+      const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/reportes/compras-por-sucursal-cuenta?${params.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Error al consultar");
       setData(json);

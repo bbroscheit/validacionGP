@@ -1,4 +1,5 @@
 const { getGpPoolEcobahia, getGpPoolSist2, sql } = require('../../config/gpPool');
+const { coincideSucursal } = require('../../services/autorizacion');
 
 const POOLS = { ecobahia: getGpPoolEcobahia, sist2: getGpPoolSist2 };
 
@@ -51,7 +52,7 @@ const COLUMNAS_EXCLUIDAS = [
 // `truncated`/`totalCount` en vez de cortar sin avisar.
 const MAX_ROWS = 100000;
 
-const getGastos = async ({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, empresa = 'ecobahia' }) => {
+const getGastos = async ({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, empresa = 'ecobahia', sucursalRestringida = null }) => {
   if (!cuentaDesde || !cuentaHasta) {
     throw new Error('cuentaDesde y cuentaHasta son requeridos (rango de cuentas de gastos)');
   }
@@ -170,8 +171,16 @@ const getGastos = async ({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, emp
     });
   });
 
+  // Acceso restringido por sucursal (services/autorizacion.js, a partir del "o" de AD):
+  // se filtra por Zona (ZONA_DESC) - las filas "En Blanco" (sin dimensión cargada, o
+  // empresa=sist2 que no tiene esta Contabilidad Analítica) quedan afuera para un
+  // usuario restringido, no se puede confirmar que sean de su sucursal.
+  const filasVisibles = sucursalRestringida
+    ? result.recordset.filter((row) => coincideSucursal(row.ZONA_DESC, sucursalRestringida))
+    : result.recordset;
+
   const grupos = { ventas: [], recibos: [], pagos: [], financiero: [], compras: [], otro: [] };
-  result.recordset.forEach((row) => {
+  filasVisibles.forEach((row) => {
     const sourcdoc = String(row.SOURCDOC || '').trim();
     const grupo = Object.keys(SOURCDOC_GRUPOS).find((key) => SOURCDOC_GRUPOS[key].includes(sourcdoc)) || 'otro';
     grupos[grupo].push(row);

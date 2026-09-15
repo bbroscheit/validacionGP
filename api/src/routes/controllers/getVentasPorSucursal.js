@@ -6,6 +6,7 @@ const {
   esNotaCreditoSist2,
 } = require('../../services/sist2Ventas');
 const { getOverridesMap } = require('../../services/clasificacionOverrides');
+const { coincideSucursal } = require('../../services/autorizacion');
 
 const POOLS = { ecobahia: getGpPoolEcobahia, sist2: getGpPoolSist2 };
 
@@ -31,7 +32,7 @@ const POOLS = { ecobahia: getGpPoolEcobahia, sist2: getGpPoolSist2 };
 const MONEDA_VACIA = 'En Blanco';
 const MAX_ROWS = 100000;
 
-const getVentasPorSucursal = async ({ fechaDesde, fechaHasta, soloConP = true, empresa = 'ecobahia' }) => {
+const getVentasPorSucursal = async ({ fechaDesde, fechaHasta, soloConP = true, empresa = 'ecobahia', sucursalRestringida = null }) => {
   if (!fechaDesde || !fechaHasta) {
     throw new Error('fechaDesde y fechaHasta son requeridos');
   }
@@ -110,8 +111,15 @@ const getVentasPorSucursal = async ({ fechaDesde, fechaHasta, soloConP = true, e
     };
   });
 
+  // Acceso restringido por sucursal (services/autorizacion.js, a partir del "o" de AD):
+  // se queda solo con las filas de la sucursal del usuario - las "En Blanco"/sin
+  // catalogar quedan afuera, no se puede confirmar que sean de esa sucursal.
+  const baseVisible = sucursalRestringida
+    ? base.filter((row) => coincideSucursal(row.Sucursal, sucursalRestringida))
+    : base;
+
   const agrupado = new Map();
-  base.forEach((row) => {
+  baseVisible.forEach((row) => {
     if (!agrupado.has(row.Sucursal)) {
       agrupado.set(row.Sucursal, { Sucursal: row.Sucursal, CantidadComprobantes: 0, Neto: 0, Impuestos: 0, Total: 0 });
     }
@@ -132,7 +140,7 @@ const getVentasPorSucursal = async ({ fechaDesde, fechaHasta, soloConP = true, e
   return {
     totalCount,
     truncated: totalCount > MAX_ROWS,
-    base,
+    base: baseVisible,
     baseColumns: ['Sucursal', 'Comprobante', 'DOCDATE', 'Cliente', 'NombreCliente', 'Editado', 'Neto', 'Impuestos', 'Total'],
     rows,
     columns: ['Sucursal', 'CantidadComprobantes', 'Neto', 'Impuestos', 'Total'],

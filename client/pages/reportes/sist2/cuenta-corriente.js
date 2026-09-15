@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { apiFetch } from "@/functions/apiFetch";
 
 const CLIENTES_POR_PAGINA = 10;
 const SUCURSALES = ["Bahía Blanca", "Casa Central", "La Pampa", "Mar del Plata", "Puerto Madryn", "Tandil"];
@@ -39,7 +40,7 @@ export default function CuentaCorrienteSist2() {
     debounceRef.current = setTimeout(async () => {
       setBuscandoCliente(true);
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/reportes/sist2/clientes?q=${encodeURIComponent(busqueda.trim())}`);
+        const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/reportes/sist2/clientes?q=${encodeURIComponent(busqueda.trim())}`);
         const json = await res.json();
         setOpciones(Array.isArray(json) ? json : []);
       } catch {
@@ -69,7 +70,7 @@ export default function CuentaCorrienteSist2() {
       if (sucursal) params.set("sucursal", sucursal);
       if (pendientes) params.set("pendientes", "true");
 
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/reportes/sist2/cuenta-corriente?${params.toString()}`);
+      const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/reportes/sist2/cuenta-corriente?${params.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Error al consultar");
       setData(json);
@@ -119,7 +120,7 @@ export default function CuentaCorrienteSist2() {
         if (fechaDesde) params.set("fechaDesde", fechaDesde);
         if (fechaHasta) params.set("fechaHasta", fechaHasta);
         if (pendientes) params.set("pendientes", "true");
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/reportes/sist2/cuenta-corriente?${params.toString()}`);
+        const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/reportes/sist2/cuenta-corriente?${params.toString()}`);
         const json = await res.json();
         if (res.ok && json.modo === "listado") clientesTodos = json.clientes;
       }

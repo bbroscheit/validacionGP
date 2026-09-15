@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { exportToExcelMultiHoja } from "@/functions/exportToExcel";
 import DocumentosClasificacionModal from "@/components/DocumentosClasificacionModal";
+import { apiFetch } from "@/functions/apiFetch";
 
 function formatMonto(n) {
   return (n ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -28,7 +29,7 @@ export default function VentasPorSucursal() {
       params.set("fechaHasta", fechaHasta);
       params.set("soloConP", soloConP);
 
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/reportes/ventas-por-sucursal?${params.toString()}`);
+      const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/reportes/ventas-por-sucursal?${params.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Error al consultar");
       setData(json);

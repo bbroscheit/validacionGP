@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { exportToExcelMultiHoja } from "@/functions/exportToExcel";
+import { apiFetch } from "@/functions/apiFetch";
+import DocumentosClasificacionModal from "@/components/DocumentosClasificacionModal";
 
 function formatMonto(n) {
   return (n ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -11,9 +13,9 @@ export default function CobranzasSist2() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [modalSucursal, setModalSucursal] = useState(null);
 
-  const buscar = async (e) => {
-    e.preventDefault();
+  const ejecutarBusqueda = async () => {
     setLoading(true);
     setError("");
     try {
@@ -21,7 +23,7 @@ export default function CobranzasSist2() {
       params.set("fechaDesde", fechaDesde);
       params.set("fechaHasta", fechaHasta);
 
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/reportes/sist2/cobranzas?${params.toString()}`);
+      const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/reportes/sist2/cobranzas?${params.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Error al consultar");
       setData(json);
@@ -32,6 +34,40 @@ export default function CobranzasSist2() {
     }
   };
 
+  const buscar = (e) => {
+    e.preventDefault();
+    ejecutarBusqueda();
+  };
+
+  // Arma un documento por Recibo (el detalle base trae una línea por Recibo+Factura
+  // aplicada, más la línea residual "Cliente") para el modal de edición: se suma todo el
+  // Monto de sus líneas en Neto (acá no hay Impuestos separados) y se toma Fecha/Cliente
+  // de cualquiera de sus líneas (son iguales en todas).
+  const documentosModal = useMemo(() => {
+    if (!modalSucursal || !data) return null;
+    const porRecibo = new Map();
+    data.base.forEach((row) => {
+      if (row.Sucursal !== modalSucursal) return;
+      if (!porRecibo.has(row.Recibo)) {
+        porRecibo.set(row.Recibo, {
+          Comprobante: row.Recibo,
+          DOCDATE: row.Fecha,
+          Cliente: row.Cliente,
+          NombreCliente: row.ClienteNombre,
+          Sucursal: row.Sucursal,
+          Editado: row.Editado,
+          Neto: 0,
+          Impuestos: 0,
+        });
+      }
+      porRecibo.get(row.Recibo).Neto += row.Monto;
+    });
+    const documentos = [...porRecibo.values()]
+      .map((d) => ({ ...d, Total: d.Neto + d.Impuestos }))
+      .sort((a, b) => a.Comprobante.localeCompare(b.Comprobante));
+    return { documentos };
+  }, [modalSucursal, data]);
+
   return (
     <div>
       <h1 className="text-xl font-semibold mb-4">Cobranzas por sucursal (Sist2)</h1>
@@ -40,7 +76,8 @@ export default function CobranzasSist2() {
         sucursal propia - se resuelve con la sucursal de la factura a la que están aplicados
         (columna &quot;Monto Documento&quot;) y, si no hay factura o no resuelve, con la ficha del
         cliente que pagó (columna &quot;Monto Cliente&quot;). &quot;En Blanco&quot; son los que
-        tampoco tienen sucursal en la ficha del cliente.
+        tampoco tienen sucursal en la ficha del cliente. Hacé click en una sucursal para
+        ver y corregir los recibos que la componen.
       </p>
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
@@ -96,7 +133,16 @@ export default function CobranzasSist2() {
               <tbody>
                 {data.rows.map((row, i) => (
                   <tr key={row.Sucursal} className={i % 2 ? "" : "bg-gray-50/60"}>
-                    <td className="px-4 py-2 border-b border-[var(--color-border)]">{row.Sucursal}</td>
+                    <td className="px-4 py-2 border-b border-[var(--color-border)]">
+                      <button
+                        type="button"
+                        onClick={() => setModalSucursal(row.Sucursal)}
+                        className="hover:underline hover:text-[var(--color-primary)] text-left"
+                        title="Ver y corregir los recibos que forman el saldo de esta sucursal"
+                      >
+                        {row.Sucursal}
+                      </button>
+                    </td>
                     <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(row.MontoDocumento)}</td>
                     <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(row.MontoCliente)}</td>
                     <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums font-medium">{formatMonto(row.Total)}</td>
@@ -114,6 +160,20 @@ export default function CobranzasSist2() {
             </table>
           </div>
         </div>
+      )}
+
+      {modalSucursal && documentosModal && (
+        <DocumentosClasificacionModal
+          empresa="sist2"
+          tipo="sucursal_recibo"
+          campo="Sucursal"
+          campoLabel="Sucursal"
+          valorGrupo={modalSucursal}
+          documentos={documentosModal.documentos}
+          sugerencias={data.rows.map((r) => r.Sucursal).filter((v) => v !== "En Blanco")}
+          onClose={() => setModalSucursal(null)}
+          onGuardado={ejecutarBusqueda}
+        />
       )}
     </div>
   );

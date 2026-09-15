@@ -1,4 +1,6 @@
 const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
+const { coincideSucursal } = require('../../services/autorizacion');
+const { getOverridesMap } = require('../../services/clasificacionOverrides');
 
 // Reporte - Compras por sucursal (zona de Contabilidad Analítica)
 // A diferencia de Ventas, las compras (PM10000/PM20000/PM30200) no tienen un campo de
@@ -31,7 +33,7 @@ const CUENTAS_CONTRAPARTIDA = ['211101-01-000', '223202-01-000'];
 const ACCATNUM_IMPUESTOS = 9;
 const MAX_ROWS = 100000;
 
-const getComprasPorSucursal = async ({ fechaDesde, fechaHasta }) => {
+const getComprasPorSucursal = async ({ fechaDesde, fechaHasta, sucursalRestringida = null }) => {
   if (!fechaDesde || !fechaHasta) {
     throw new Error('fechaDesde y fechaHasta son requeridos');
   }
@@ -75,48 +77,62 @@ const getComprasPorSucursal = async ({ fechaDesde, fechaHasta }) => {
   `);
   const totalCount = count.recordset[0].total;
 
-  const detalleRequest = bindFilters(pool.request());
-  const detalle = await detalleRequest.query(`
-    WITH AADetalle AS (
-      SELECT
-        A.[Entrada de diario] AS JRNENTRY,
-        A.[Índice de cuenta] AS ACTINDX,
-        MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'ZONA'
-            THEN NULLIF(LTRIM(RTRIM(A.[Cód. de dimensión de trans.])), '') END) AS ZONA,
-        MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'ZONA'
-            THEN NULLIF(LTRIM(RTRIM(A.[Descripción del código de dimensión de transacción])), '') END) AS ZONA_DESC
-      FROM dbo.AATransactions A
-      GROUP BY A.[Entrada de diario], A.[Índice de cuenta]
-    )
-    SELECT TOP (${MAX_ROWS})
-      NULLIF(UPPER(LTRIM(RTRIM(AA.ZONA_DESC))), '') AS Sucursal,
-      AA.ZONA AS ZonaCodigo,
-      LTRIM(RTRIM(G.ORDOCNUM)) AS Comprobante,
-      LTRIM(RTRIM(N.ACTNUMST)) AS Cuenta,
-      LTRIM(RTRIM(A.ACTDESCR)) AS CuentaDescripcion,
-      A.ACCATNUM,
-      G.DEBITAMT,
-      G.CRDTAMNT
-    FROM GL20000 AS G
-    INNER JOIN GL00105 AS N ON N.ACTINDX = G.ACTINDX
-    INNER JOIN GL00100 AS A ON A.ACTINDX = G.ACTINDX
-    LEFT JOIN AADetalle AS AA ON AA.JRNENTRY = G.JRNENTRY AND AA.ACTINDX = G.ACTINDX
-    WHERE
-      LTRIM(RTRIM(G.SOURCDOC)) IN ('PMTRX', 'PMVVR')
-      AND G.TRXDATE >= @fechaDesde
-      AND G.TRXDATE <= @fechaHasta
-      AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (@cuentaContrapartida1, @cuentaContrapartida2)
-      ${noAnuladaWhere}
-    ORDER BY Sucursal ASC, G.TRXDATE ASC
-  `);
+  const [detalle, overridesMap] = await Promise.all([
+    bindFilters(pool.request()).query(`
+      WITH AADetalle AS (
+        SELECT
+          A.[Entrada de diario] AS JRNENTRY,
+          A.[Índice de cuenta] AS ACTINDX,
+          MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'ZONA'
+              THEN NULLIF(LTRIM(RTRIM(A.[Cód. de dimensión de trans.])), '') END) AS ZONA,
+          MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'ZONA'
+              THEN NULLIF(LTRIM(RTRIM(A.[Descripción del código de dimensión de transacción])), '') END) AS ZONA_DESC
+        FROM dbo.AATransactions A
+        GROUP BY A.[Entrada de diario], A.[Índice de cuenta]
+      )
+      SELECT TOP (${MAX_ROWS})
+        NULLIF(UPPER(LTRIM(RTRIM(AA.ZONA_DESC))), '') AS Sucursal,
+        AA.ZONA AS ZonaCodigo,
+        LTRIM(RTRIM(G.ORDOCNUM)) AS Comprobante,
+        G.TRXDATE,
+        LTRIM(RTRIM(G.ORMSTRID)) AS Proveedor,
+        LTRIM(RTRIM(V.VENDNAME)) AS NombreProveedor,
+        LTRIM(RTRIM(N.ACTNUMST)) AS Cuenta,
+        LTRIM(RTRIM(A.ACTDESCR)) AS CuentaDescripcion,
+        A.ACCATNUM,
+        G.DEBITAMT,
+        G.CRDTAMNT
+      FROM GL20000 AS G
+      INNER JOIN GL00105 AS N ON N.ACTINDX = G.ACTINDX
+      INNER JOIN GL00100 AS A ON A.ACTINDX = G.ACTINDX
+      LEFT JOIN AADetalle AS AA ON AA.JRNENTRY = G.JRNENTRY AND AA.ACTINDX = G.ACTINDX
+      LEFT JOIN PM00200 AS V ON LTRIM(RTRIM(V.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
+      WHERE
+        LTRIM(RTRIM(G.SOURCDOC)) IN ('PMTRX', 'PMVVR')
+        AND G.TRXDATE >= @fechaDesde
+        AND G.TRXDATE <= @fechaHasta
+        AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (@cuentaContrapartida1, @cuentaContrapartida2)
+        ${noAnuladaWhere}
+      ORDER BY Sucursal ASC, G.TRXDATE ASC
+    `),
+    getOverridesMap({ empresa: 'ecobahia', tipo: 'zona' }),
+  ]);
 
+  // Overrides manuales (clasificacionOverrides.js, tipo "zona" - separado de "sucursal"
+  // que usan los reportes de Ventas, aunque comparte el mismo mecanismo): para cuando la
+  // Contabilidad Analítica no tiene la dimensión ZONA cargada en un asiento puntual.
   const base = detalle.recordset.map((row) => {
     const monto = (row.DEBITAMT || 0) - (row.CRDTAMNT || 0);
     const esImpuesto = row.ACCATNUM === ACCATNUM_IMPUESTOS;
+    const override = overridesMap.get(row.Comprobante);
     return {
-      Sucursal: row.Sucursal || MONEDA_VACIA,
+      Sucursal: override || row.Sucursal || MONEDA_VACIA,
       ZonaCodigo: row.ZonaCodigo || MONEDA_VACIA,
       Comprobante: row.Comprobante,
+      DOCDATE: row.TRXDATE,
+      Proveedor: row.Proveedor,
+      NombreProveedor: row.NombreProveedor,
+      Editado: !!override,
       Cuenta: row.Cuenta,
       CuentaDescripcion: row.CuentaDescripcion,
       Clasificacion: esImpuesto ? 'Impuestos' : 'Neto',
@@ -124,8 +140,12 @@ const getComprasPorSucursal = async ({ fechaDesde, fechaHasta }) => {
     };
   });
 
+  const baseVisible = sucursalRestringida
+    ? base.filter((row) => coincideSucursal(row.Sucursal, sucursalRestringida))
+    : base;
+
   const agrupado = new Map();
-  base.forEach((row) => {
+  baseVisible.forEach((row) => {
     if (!agrupado.has(row.Sucursal)) {
       agrupado.set(row.Sucursal, { Sucursal: row.Sucursal, comprobantes: new Set(), Neto: 0, Impuestos: 0 });
     }
@@ -145,7 +165,7 @@ const getComprasPorSucursal = async ({ fechaDesde, fechaHasta }) => {
     }))
     .sort((a, b) => a.Sucursal.localeCompare(b.Sucursal));
 
-  const totalComprobantes = new Set(base.map((row) => row.Comprobante)).size;
+  const totalComprobantes = new Set(baseVisible.map((row) => row.Comprobante)).size;
   const totalNeto = rows.reduce((acc, row) => acc + row.Neto, 0);
   const totalImpuestos = rows.reduce((acc, row) => acc + row.Impuestos, 0);
   const totalGeneral = totalNeto + totalImpuestos;
@@ -153,8 +173,8 @@ const getComprasPorSucursal = async ({ fechaDesde, fechaHasta }) => {
   return {
     totalCount,
     truncated: totalCount > MAX_ROWS,
-    base,
-    baseColumns: ['Sucursal', 'ZonaCodigo', 'Comprobante', 'Cuenta', 'CuentaDescripcion', 'Clasificacion', 'Monto'],
+    base: baseVisible,
+    baseColumns: ['Sucursal', 'ZonaCodigo', 'Comprobante', 'DOCDATE', 'Proveedor', 'NombreProveedor', 'Editado', 'Cuenta', 'CuentaDescripcion', 'Clasificacion', 'Monto'],
     rows,
     columns: ['Sucursal', 'CantidadComprobantes', 'Neto', 'Impuestos', 'Total'],
     totalComprobantes,

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { exportToExcelMultiHoja } from "@/functions/exportToExcel";
+import { apiFetch } from "@/functions/apiFetch";
 
 function formatMonto(n) {
   return (n ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -19,7 +20,7 @@ export default function AsientoCompras() {
   const [error, setError] = useState("");
 
   // useEffect(() => {
-  //   fetch(`${process.env.NEXT_PUBLIC_API_URL}/reportes/sucursales-compras`)
+  //   apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/reportes/sucursales-compras`)
   //     .then((res) => res.json())
   //     .then(setSucursales)
   //     .catch(() => {});
@@ -35,7 +36,7 @@ export default function AsientoCompras() {
       params.set("fechaHasta", fechaHasta);
       // if (sucursal) params.set("sucursal", sucursal);
 
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/reportes/asiento-compras?${params.toString()}`);
+      const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/reportes/asiento-compras?${params.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Error al consultar");
       setData(json);

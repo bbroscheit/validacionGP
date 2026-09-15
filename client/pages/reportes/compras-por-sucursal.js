@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { exportToExcel, exportToExcelMultiHoja } from "@/functions/exportToExcel";
+import { exportToExcelMultiHoja } from "@/functions/exportToExcel";
+import { apiFetch } from "@/functions/apiFetch";
+import DocumentosClasificacionModal from "@/components/DocumentosClasificacionModal";
 
 function formatMonto(n) {
   return (n ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -18,8 +20,7 @@ export default function ComprasPorSucursal() {
   const [incluidas, setIncluidas] = useState(new Set());
   const [modalSucursal, setModalSucursal] = useState(null);
 
-  const buscar = async (e) => {
-    e.preventDefault();
+  const ejecutarBusqueda = async () => {
     setLoading(true);
     setError("");
     try {
@@ -27,7 +28,7 @@ export default function ComprasPorSucursal() {
       params.set("fechaDesde", fechaDesde);
       params.set("fechaHasta", fechaHasta);
 
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/reportes/compras-por-sucursal?${params.toString()}`);
+      const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/reportes/compras-por-sucursal?${params.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Error al consultar");
       setData(json);
@@ -36,6 +37,11 @@ export default function ComprasPorSucursal() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const buscar = (e) => {
+    e.preventDefault();
+    ejecutarBusqueda();
   };
 
   useEffect(() => {
@@ -65,18 +71,35 @@ export default function ComprasPorSucursal() {
     return { totalComprobantes, totalNeto, totalImpuestos, totalGeneral: totalNeto + totalImpuestos };
   }, [data, incluidas]);
 
+  // Arma un documento por Comprobante (el detalle base viene por línea de asiento) para
+  // el modal de edición, igual formato que usan los reportes de Ventas: Neto/Impuestos
+  // separados según la Clasificacion de cada línea, Proveedor/Fecha/Editado tomados de
+  // cualquiera de sus líneas (son iguales en todas).
   const documentosModal = useMemo(() => {
     if (!modalSucursal || !data) return null;
     const porComprobante = new Map();
     data.base.forEach((row) => {
       if (row.Sucursal !== modalSucursal) return;
       if (!porComprobante.has(row.Comprobante)) {
-        porComprobante.set(row.Comprobante, { Comprobante: row.Comprobante, Monto: 0 });
+        porComprobante.set(row.Comprobante, {
+          Comprobante: row.Comprobante,
+          DOCDATE: row.DOCDATE,
+          Cliente: row.Proveedor,
+          NombreCliente: row.NombreProveedor,
+          Sucursal: row.Sucursal,
+          Editado: row.Editado,
+          Neto: 0,
+          Impuestos: 0,
+        });
       }
-      porComprobante.get(row.Comprobante).Monto += row.Monto;
+      const doc = porComprobante.get(row.Comprobante);
+      if (row.Clasificacion === "Impuestos") doc.Impuestos += row.Monto;
+      else doc.Neto += row.Monto;
     });
-    const documentos = [...porComprobante.values()].sort((a, b) => a.Comprobante.localeCompare(b.Comprobante));
-    const total = documentos.reduce((acc, d) => acc + d.Monto, 0);
+    const documentos = [...porComprobante.values()]
+      .map((d) => ({ ...d, Total: d.Neto + d.Impuestos }))
+      .sort((a, b) => a.Comprobante.localeCompare(b.Comprobante));
+    const total = documentos.reduce((acc, d) => acc + d.Total, 0);
     return { documentos, total };
   }, [modalSucursal, data]);
 
@@ -112,7 +135,8 @@ export default function ComprasPorSucursal() {
         Impuestos = cuentas de IVA Crédito Fiscal / percepciones (ACCATNUM=9); Neto = todo
         lo demás (gastos, activo, préstamos). Se excluyen únicamente las cuentas que
         funcionan como contrapartida de pago: proveedores (211101) y Visa Francés a Pagar
-        (223202).
+        (223202). Hacé click en una sucursal para ver y corregir los comprobantes que la
+        componen.
       </p>
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
@@ -177,7 +201,7 @@ export default function ComprasPorSucursal() {
                           type="button"
                           onClick={() => setModalSucursal(row.Sucursal)}
                           className="hover:underline hover:text-[var(--color-primary)] text-left"
-                          title="Ver los comprobantes que forman el saldo de esta sucursal"
+                          title="Ver y corregir los comprobantes que forman el saldo de esta sucursal"
                         >
                           {row.Sucursal}
                         </button>
@@ -205,64 +229,18 @@ export default function ComprasPorSucursal() {
       )}
 
       {modalSucursal && documentosModal && (
-        <div
-          className="fixed inset-0 bg-black/40 flex items-center justify-center z-20 p-4"
-          onClick={() => setModalSucursal(null)}
-        >
-          <div
-            className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[80vh] flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)]">
-              <h3 className="font-semibold">Comprobantes — {modalSucursal}</h3>
-              <button
-                type="button"
-                onClick={() => setModalSucursal(null)}
-                className="text-gray-500 hover:text-gray-800 text-lg leading-none px-1"
-                aria-label="Cerrar"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="overflow-y-auto flex-1">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-50">
-                    <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Comprobante</th>
-                    <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Monto</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {documentosModal.documentos.map((doc, i) => (
-                    <tr key={doc.Comprobante} className={i % 2 ? "" : "bg-gray-50/60"}>
-                      <td className="px-4 py-2 border-b border-[var(--color-border)] whitespace-nowrap">{doc.Comprobante}</td>
-                      <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(doc.Monto)}</td>
-                    </tr>
-                  ))}
-                  {documentosModal.documentos.length === 0 && (
-                    <tr><td colSpan={2} className="px-4 py-3 text-center text-gray-500">Sin comprobantes.</td></tr>
-                  )}
-                </tbody>
-                <tfoot>
-                  <tr className="bg-gray-100 font-semibold">
-                    <td className="px-4 py-2 border-t-2 border-[var(--color-border)]">Total</td>
-                    <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(documentosModal.total)}</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-
-            <div className="px-4 py-3 border-t border-[var(--color-border)] flex justify-end">
-              <button
-                onClick={() => exportToExcel(documentosModal.documentos, ["Comprobante", "Monto"], `comprobantes-${modalSucursal}`)}
-                className="text-xs bg-green-700 text-white rounded px-3 py-1"
-              >
-                Descargar Excel
-              </button>
-            </div>
-          </div>
-        </div>
+        <DocumentosClasificacionModal
+          empresa="ecobahia"
+          tipo="zona"
+          campo="Sucursal"
+          campoLabel="Sucursal"
+          entidadLabel="Proveedor"
+          valorGrupo={modalSucursal}
+          documentos={documentosModal.documentos}
+          sugerencias={data.rows.map((r) => r.Sucursal).filter((v) => v !== "En Blanco")}
+          onClose={() => setModalSucursal(null)}
+          onGuardado={ejecutarBusqueda}
+        />
       )}
     </div>
   );

@@ -21,9 +21,13 @@ const getCobranzasSist2 = require('./controllers/getCobranzasSist2.js');
 const getClientesSist2 = require('./controllers/getClientesSist2.js');
 const getCuentaCorrienteSist2 = require('./controllers/getCuentaCorrienteSist2.js');
 const { putOverrideClasificacion, deleteOverrideClasificacion } = require('./controllers/overridesClasificacion.js');
+const bloquearSiRestringido = require('../middlewares/bloquearSiRestringido.js');
 
 // Endpoint 1 - Ventas: SOP30200/SOP30300 filtrado por sucursal y fechas
-validacionRouter.get('/ventas', async (req, res) => {
+// Bloqueado para usuarios restringidos por sucursal (services/autorizacion.js): esta
+// base no calcula una Sucursal confiable por fila para Ecobahia (LOCNCODE no sirve, ver
+// comentario en getVentas.js), no hay forma segura de filtrarla.
+validacionRouter.get('/ventas', bloquearSiRestringido, async (req, res) => {
   try {
     const { sucursal, fechaDesde, fechaHasta, soloConP, empresa } = req.query;
     const data = await getVentas({ sucursal, fechaDesde, fechaHasta, soloConP, empresa });
@@ -35,7 +39,9 @@ validacionRouter.get('/ventas', async (req, res) => {
 });
 
 // Endpoint 2 - Compras: PM30200/PM10000 filtrando solo facturas
-validacionRouter.get('/compras', async (req, res) => {
+// Bloqueado para usuarios restringidos: no tiene dimensión de zona/sucursal (ver
+// getComprasPorSucursal.js - la zona solo se puede resolver vía GL20000/AATransactions).
+validacionRouter.get('/compras', bloquearSiRestringido, async (req, res) => {
   try {
     const { fechaDesde, fechaHasta } = req.query;
     const data = await getCompras({ fechaDesde, fechaHasta });
@@ -50,7 +56,7 @@ validacionRouter.get('/compras', async (req, res) => {
 validacionRouter.get('/gastos', async (req, res) => {
   try {
     const { cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, empresa } = req.query;
-    const data = await getGastos({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, empresa });
+    const data = await getGastos({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, empresa, sucursalRestringida: req.sucursalRestringida });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /gastos', e.message);
@@ -59,7 +65,8 @@ validacionRouter.get('/gastos', async (req, res) => {
 });
 
 // Endpoint 4 - OPB: GL20000 aislando órdenes de pago varias sin factura
-validacionRouter.get('/opb', async (req, res) => {
+// Bloqueado para usuarios restringidos: sin dimensión de sucursal/zona.
+validacionRouter.get('/opb', bloquearSiRestringido, async (req, res) => {
   try {
     const { cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, referencia, sourcdoc } = req.query;
     const data = await getOpb({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, referencia, sourcdoc });
@@ -74,7 +81,7 @@ validacionRouter.get('/opb', async (req, res) => {
 validacionRouter.get('/reportes/ventas-por-sucursal', async (req, res) => {
   try {
     const { fechaDesde, fechaHasta, soloConP, empresa } = req.query;
-    const data = await getVentasPorSucursal({ fechaDesde, fechaHasta, soloConP, empresa });
+    const data = await getVentasPorSucursal({ fechaDesde, fechaHasta, soloConP, empresa, sucursalRestringida: req.sucursalRestringida });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/ventas-por-sucursal', e.message);
@@ -84,7 +91,10 @@ validacionRouter.get('/reportes/ventas-por-sucursal', async (req, res) => {
 
 // Reporte - Ventas por provincia (solo Ecobahia): SOP30200 agrupado por STATE, monto
 // facturado neto (misma lógica que ventas-por-sucursal)
-validacionRouter.get('/reportes/ventas-por-provincia', async (req, res) => {
+// Bloqueado para usuarios restringidos: la Provincia no es lo mismo que la Sucursal del
+// usuario (una misma provincia puede tener ventas de varias sucursales), no hay una
+// forma segura de acotarlo a "su" sucursal.
+validacionRouter.get('/reportes/ventas-por-provincia', bloquearSiRestringido, async (req, res) => {
   try {
     const { fechaDesde, fechaHasta, soloConP } = req.query;
     const data = await getVentasPorProvincia({ fechaDesde, fechaHasta, soloConP });
@@ -100,7 +110,7 @@ validacionRouter.get('/reportes/ventas-por-provincia', async (req, res) => {
 validacionRouter.get('/reportes/ventas-por-sucursal-cuenta', async (req, res) => {
   try {
     const { fechaDesde, fechaHasta, soloConP, empresa } = req.query;
-    const data = await getVentasPorSucursalCuenta({ fechaDesde, fechaHasta, soloConP, empresa });
+    const data = await getVentasPorSucursalCuenta({ fechaDesde, fechaHasta, soloConP, empresa, sucursalRestringida: req.sucursalRestringida });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/ventas-por-sucursal-cuenta', e.message);
@@ -112,7 +122,7 @@ validacionRouter.get('/reportes/ventas-por-sucursal-cuenta', async (req, res) =>
 validacionRouter.get('/reportes/asiento-ventas', async (req, res) => {
   try {
     const { fechaDesde, fechaHasta, sucursal, soloConP, empresa } = req.query;
-    const data = await getAsientoVentas({ fechaDesde, fechaHasta, sucursal, soloConP, empresa });
+    const data = await getAsientoVentas({ fechaDesde, fechaHasta, sucursal, soloConP, empresa, sucursalRestringida: req.sucursalRestringida });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/asiento-ventas', e.message);
@@ -133,7 +143,8 @@ validacionRouter.get('/reportes/sucursales-ventas', async (req, res) => {
 });
 
 // Reporte - Ventas por categoría de cuenta (USERDEF2) y tipo de contribuyente
-validacionRouter.get('/reportes/ventas-categoria-contribuyente', async (req, res) => {
+// Bloqueado para usuarios restringidos: sin dimensión de sucursal.
+validacionRouter.get('/reportes/ventas-categoria-contribuyente', bloquearSiRestringido, async (req, res) => {
   try {
     const { fechaDesde, fechaHasta, soloConP } = req.query;
     const data = await getVentasPorCategoriaContribuyente({ fechaDesde, fechaHasta, soloConP });
@@ -149,7 +160,7 @@ validacionRouter.get('/reportes/ventas-categoria-contribuyente', async (req, res
 validacionRouter.get('/reportes/compras-por-sucursal', async (req, res) => {
   try {
     const { fechaDesde, fechaHasta } = req.query;
-    const data = await getComprasPorSucursal({ fechaDesde, fechaHasta });
+    const data = await getComprasPorSucursal({ fechaDesde, fechaHasta, sucursalRestringida: req.sucursalRestringida });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/compras-por-sucursal', e.message);
@@ -162,7 +173,7 @@ validacionRouter.get('/reportes/compras-por-sucursal', async (req, res) => {
 validacionRouter.get('/reportes/compras-por-sucursal-cuenta', async (req, res) => {
   try {
     const { fechaDesde, fechaHasta } = req.query;
-    const data = await getComprasPorSucursalCuenta({ fechaDesde, fechaHasta });
+    const data = await getComprasPorSucursalCuenta({ fechaDesde, fechaHasta, sucursalRestringida: req.sucursalRestringida });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/compras-por-sucursal-cuenta', e.message);
@@ -171,7 +182,9 @@ validacionRouter.get('/reportes/compras-por-sucursal-cuenta', async (req, res) =
 });
 
 // Reporte - Asiento contable de compras (resumen Debe/Haber), opcionalmente por sucursal
-validacionRouter.get('/reportes/asiento-compras', async (req, res) => {
+// Bloqueado para usuarios restringidos: el filtro por sucursal está deshabilitado en
+// este reporte (comentado desde antes de este feature), no hay forma de acotarlo.
+validacionRouter.get('/reportes/asiento-compras', bloquearSiRestringido, async (req, res) => {
   try {
     const { fechaDesde, fechaHasta /* , sucursal */ } = req.query;
     const data = await getAsientoCompras({ fechaDesde, fechaHasta /* , sucursal */ });
@@ -194,7 +207,8 @@ validacionRouter.get('/reportes/sucursales-compras', async (req, res) => {
 });
 
 // Reporte - Compras por categoría de cuenta (USERDEF2) y tipo de contribuyente del proveedor
-validacionRouter.get('/reportes/compras-categoria-contribuyente', async (req, res) => {
+// Bloqueado para usuarios restringidos: sin dimensión de sucursal/zona.
+validacionRouter.get('/reportes/compras-categoria-contribuyente', bloquearSiRestringido, async (req, res) => {
   try {
     const { fechaDesde, fechaHasta } = req.query;
     const data = await getComprasPorCategoriaContribuyente({ fechaDesde, fechaHasta });
@@ -206,7 +220,9 @@ validacionRouter.get('/reportes/compras-categoria-contribuyente', async (req, re
 });
 
 // Libro IVA Digital (ARCA, R.G. 4597) - resumen Neto/Impuestos/Total de ventas y compras
-validacionRouter.get('/reportes/libro-iva-digital/resumen', async (req, res) => {
+// Bloqueado para usuarios restringidos: es el libro de IVA de toda la empresa (se
+// presenta a nivel CUIT, no por sucursal), no tiene sentido acotarlo.
+validacionRouter.get('/reportes/libro-iva-digital/resumen', bloquearSiRestringido, async (req, res) => {
   try {
     const { fechaDesde, fechaHasta } = req.query;
     const data = await getLibroIvaDigitalResumen({ fechaDesde, fechaHasta });
@@ -218,7 +234,8 @@ validacionRouter.get('/reportes/libro-iva-digital/resumen', async (req, res) => 
 });
 
 // Libro IVA Digital (ARCA, R.G. 4597) - genera los 4 .txt (ventas/compras x cbte/alicuotas)
-validacionRouter.get('/reportes/libro-iva-digital/export', async (req, res) => {
+// Bloqueado para usuarios restringidos, mismo motivo que el resumen de arriba.
+validacionRouter.get('/reportes/libro-iva-digital/export', bloquearSiRestringido, async (req, res) => {
   try {
     const { fechaDesde, fechaHasta } = req.query;
     const data = await getLibroIvaDigitalExport({ fechaDesde, fechaHasta });
@@ -234,7 +251,7 @@ validacionRouter.get('/reportes/libro-iva-digital/export', async (req, res) => {
 validacionRouter.get('/reportes/sist2/cobranzas', async (req, res) => {
   try {
     const { fechaDesde, fechaHasta } = req.query;
-    const data = await getCobranzasSist2({ fechaDesde, fechaHasta });
+    const data = await getCobranzasSist2({ fechaDesde, fechaHasta, sucursalRestringida: req.sucursalRestringida });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/sist2/cobranzas', e.message);
@@ -259,7 +276,7 @@ validacionRouter.get('/reportes/sist2/clientes', async (req, res) => {
 validacionRouter.get('/reportes/sist2/cuenta-corriente', async (req, res) => {
   try {
     const { cliente, fechaDesde, fechaHasta, sucursal, pendientes } = req.query;
-    const data = await getCuentaCorrienteSist2({ cliente, fechaDesde, fechaHasta, sucursal, pendientes });
+    const data = await getCuentaCorrienteSist2({ cliente, fechaDesde, fechaHasta, sucursal, pendientes, sucursalRestringida: req.sucursalRestringida });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/sist2/cuenta-corriente', e.message);

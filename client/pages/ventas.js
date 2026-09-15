@@ -1,5 +1,6 @@
 import { useState } from "react";
 import ResultTable from "@/components/ResultTable";
+import { apiFetch } from "@/functions/apiFetch";
 
 export default function Ventas() {
   const [empresa, setEmpresa] = useState("ecobahia");
@@ -32,7 +33,7 @@ export default function Ventas() {
       if (fechaHasta) params.set("fechaHasta", fechaHasta);
       params.set("soloConP", soloConP);
 
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ventas?${params.toString()}`);
+      const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/ventas?${params.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Error al consultar");
       setData(json);

@@ -1,5 +1,7 @@
 const { getGpPoolEcobahia, getGpPoolSist2, sql } = require('../../config/gpPool');
 const { resolverSucursalSist2, CLIENTE_SUCURSAL_JOIN_SIST2, CLIENTE_SUCURSAL_SELECT_SIST2 } = require('../../services/sist2Ventas');
+const { coincideSucursal } = require('../../services/autorizacion');
+const { getOverridesMap } = require('../../services/clasificacionOverrides');
 
 const POOLS = { ecobahia: getGpPoolEcobahia, sist2: getGpPoolSist2 };
 
@@ -28,7 +30,7 @@ const POOLS = { ecobahia: getGpPoolEcobahia, sist2: getGpPoolSist2 };
 // (pestaña "Base" + pestaña "Resultado") es una suma verificable línea por línea.
 const MAX_ROWS = 100000;
 
-const getAsientoVentas = async ({ fechaDesde, fechaHasta, sucursal, soloConP = true, empresa = 'ecobahia' }) => {
+const getAsientoVentas = async ({ fechaDesde, fechaHasta, sucursal, soloConP = true, empresa = 'ecobahia', sucursalRestringida = null }) => {
   if (!fechaDesde || !fechaHasta) {
     throw new Error('fechaDesde y fechaHasta son requeridos');
   }
@@ -38,13 +40,11 @@ const getAsientoVentas = async ({ fechaDesde, fechaHasta, sucursal, soloConP = t
   const pool = await getPool();
   const soloConPBool = soloConP === false || soloConP === 'false' ? false : true;
   const sucursalFiltro = sucursal ? sucursal.trim() : null;
-  const filtrarSucursalEnSql = empresa !== 'sist2';
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
     request.input('fechaHasta', sql.DateTime, new Date(fechaHasta));
     request.input('soloConP', sql.Bit, soloConPBool);
-    request.input('sucursal', sql.VarChar(100), filtrarSucursalEnSql ? sucursalFiltro : null);
     return request;
   };
 
@@ -52,6 +52,12 @@ const getAsientoVentas = async ({ fechaDesde, fechaHasta, sucursal, soloConP = t
   const clienteSucursalJoin = empresa === 'sist2' ? CLIENTE_SUCURSAL_JOIN_SIST2 : '';
   const clienteSucursalSelect = empresa === 'sist2' ? CLIENTE_SUCURSAL_SELECT_SIST2 : '';
 
+  // El filtro por sucursal (tanto el dropdown opcional como el acceso restringido) se
+  // resuelve siempre en JS, no en SQL: para Ecobahia hay que poder pisar PHONE3 con un
+  // override manual (clasificacionOverrides.js) cuando viene en blanco - filtrar por
+  // "H.PHONE3 = @sucursal" en SQL se comía esos comprobantes corregidos a mano (no
+  // aparecían ni con el dropdown ni, más grave, para un usuario restringido). Mismo
+  // criterio que ya usaba sist2 (ahí la sucursal nunca vino de una sola columna).
   const countRequest = bindFilters(pool.request());
   const count = await countRequest.query(`
     SELECT COUNT(*) AS total
@@ -62,39 +68,52 @@ const getAsientoVentas = async ({ fechaDesde, fechaHasta, sucursal, soloConP = t
       AND G.TRXDATE >= @fechaDesde
       AND G.TRXDATE <= @fechaHasta
       AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%')
-      AND (@sucursal IS NULL OR LTRIM(RTRIM(H.PHONE3)) = @sucursal)
   `);
   const totalCount = count.recordset[0].total;
 
-  const detalleRequest = bindFilters(pool.request());
-  const detalle = await detalleRequest.query(`
-    SELECT TOP (${MAX_ROWS})
-      NULLIF(LTRIM(RTRIM(H.PHONE3)), '') AS PHONE3,
-      LTRIM(RTRIM(H.DOCID)) AS DOCID,
-      LTRIM(RTRIM(G.ORDOCNUM)) AS Comprobante,
-      LTRIM(RTRIM(N.ACTNUMST)) AS Cuenta,
-      LTRIM(RTRIM(A.ACTDESCR)) AS CuentaDescripcion,
-      G.DEBITAMT,
-      G.CRDTAMNT${clienteSucursalSelect}
-    FROM GL20000 AS G
-    INNER JOIN GL00105 AS N ON N.ACTINDX = G.ACTINDX
-    INNER JOIN GL00100 AS A ON A.ACTINDX = G.ACTINDX
-    LEFT JOIN SOP30200 AS H ON LTRIM(RTRIM(H.SOPNUMBE)) = LTRIM(RTRIM(G.ORDOCNUM))${sopJoinCondSist2}
-    ${clienteSucursalJoin}
-    WHERE
-      LTRIM(RTRIM(G.SOURCDOC)) = 'SJ'
-      AND G.TRXDATE >= @fechaDesde
-      AND G.TRXDATE <= @fechaHasta
-      AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%')
-      AND (@sucursal IS NULL OR LTRIM(RTRIM(H.PHONE3)) = @sucursal)
-    ORDER BY Cuenta ASC
-  `);
+  const [detalle, overridesMap] = await Promise.all([
+    bindFilters(pool.request()).query(`
+      SELECT TOP (${MAX_ROWS})
+        NULLIF(LTRIM(RTRIM(H.PHONE3)), '') AS PHONE3,
+        LTRIM(RTRIM(H.DOCID)) AS DOCID,
+        LTRIM(RTRIM(G.ORDOCNUM)) AS Comprobante,
+        LTRIM(RTRIM(N.ACTNUMST)) AS Cuenta,
+        LTRIM(RTRIM(A.ACTDESCR)) AS CuentaDescripcion,
+        G.DEBITAMT,
+        G.CRDTAMNT${clienteSucursalSelect}
+      FROM GL20000 AS G
+      INNER JOIN GL00105 AS N ON N.ACTINDX = G.ACTINDX
+      INNER JOIN GL00100 AS A ON A.ACTINDX = G.ACTINDX
+      LEFT JOIN SOP30200 AS H ON LTRIM(RTRIM(H.SOPNUMBE)) = LTRIM(RTRIM(G.ORDOCNUM))${sopJoinCondSist2}
+      ${clienteSucursalJoin}
+      WHERE
+        LTRIM(RTRIM(G.SOURCDOC)) = 'SJ'
+        AND G.TRXDATE >= @fechaDesde
+        AND G.TRXDATE <= @fechaHasta
+        AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%')
+      ORDER BY Cuenta ASC
+    `),
+    getOverridesMap({ empresa, tipo: 'sucursal' }),
+  ]);
 
-  const detalleFiltrado = empresa === 'sist2' && sucursalFiltro
-    ? detalle.recordset.filter((row) => resolverSucursalSist2({ phone3: row.PHONE3, docid: row.DOCID, clienteUserdef2: row.ClienteSucursal }) === sucursalFiltro)
+  const sucursalDeFila = (row) => {
+    const sucursalCalculada = empresa === 'sist2'
+      ? resolverSucursalSist2({ phone3: row.PHONE3, docid: row.DOCID, clienteUserdef2: row.ClienteSucursal })
+      : row.PHONE3;
+    return overridesMap.get(row.Comprobante) || sucursalCalculada;
+  };
+
+  const detalleFiltrado = sucursalFiltro
+    ? detalle.recordset.filter((row) => coincideSucursal(sucursalDeFila(row), sucursalFiltro))
     : detalle.recordset;
 
-  const base = detalleFiltrado.map((row) => ({
+  // Acceso restringido por sucursal (services/autorizacion.js): el valor de AD viene con
+  // formato libre (tildes/mayúsculas), por eso coincideSucursal en vez de comparar exacto.
+  const detalleVisible = sucursalRestringida
+    ? detalleFiltrado.filter((row) => coincideSucursal(sucursalDeFila(row), sucursalRestringida))
+    : detalleFiltrado;
+
+  const base = detalleVisible.map((row) => ({
     Comprobante: row.Comprobante,
     Cuenta: row.Cuenta,
     CuentaDescripcion: row.CuentaDescripcion,

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import ResultTable from "@/components/ResultTable";
+import { apiFetch } from "@/functions/apiFetch";
 
 export default function Compras() {
   const [fechaDesde, setFechaDesde] = useState("");
@@ -17,7 +18,7 @@ export default function Compras() {
       if (fechaDesde) params.set("fechaDesde", fechaDesde);
       if (fechaHasta) params.set("fechaHasta", fechaHasta);
 
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/compras?${params.toString()}`);
+      const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/compras?${params.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Error al consultar");
       setData(json);

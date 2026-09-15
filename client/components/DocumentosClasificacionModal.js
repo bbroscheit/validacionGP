@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { apiFetch } from "@/functions/apiFetch";
 
 function formatMonto(n) {
   return (n ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -18,6 +19,7 @@ export default function DocumentosClasificacionModal({
   documentos,
   sugerencias,
   modoSeleccion = "libre", // "libre": input + datalist (sugiere pero permite texto libre) | "lista": select cerrado a `sugerencias`
+  entidadLabel = "Cliente", // "Proveedor" en Compras - la fila sigue usando row.Cliente/row.NombreCliente para no duplicar el componente
   onClose,
   onGuardado,
 }) {
@@ -39,7 +41,7 @@ export default function DocumentosClasificacionModal({
     setGuardando(true);
     setErrorEdit("");
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/overrides/clasificacion`, {
+      const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/overrides/clasificacion`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -65,7 +67,7 @@ export default function DocumentosClasificacionModal({
     setGuardando(true);
     setErrorEdit("");
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/overrides/clasificacion`, {
+      const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/overrides/clasificacion`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ empresa, tipo, comprobante: row.Comprobante }),
@@ -109,7 +111,7 @@ export default function DocumentosClasificacionModal({
               <tr>
                 <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Comprobante</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Fecha</th>
-                <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Cliente</th>
+                <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">{entidadLabel}</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Nombre</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">{campoLabel}</th>
                 <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Neto</th>

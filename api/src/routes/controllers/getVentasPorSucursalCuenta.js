@@ -1,5 +1,7 @@
 const { getGpPoolEcobahia, getGpPoolSist2, sql } = require('../../config/gpPool');
 const { resolverSucursalSist2, CLIENTE_SUCURSAL_JOIN_SIST2, CLIENTE_SUCURSAL_SELECT_SIST2 } = require('../../services/sist2Ventas');
+const { coincideSucursal } = require('../../services/autorizacion');
+const { getOverridesMap } = require('../../services/clasificacionOverrides');
 
 const POOLS = { ecobahia: getGpPoolEcobahia, sist2: getGpPoolSist2 };
 
@@ -24,7 +26,7 @@ const MONEDA_VACIA = 'En Blanco';
 const CUENTA_DEUDORES = '113110-01-000';
 const MAX_ROWS = 100000;
 
-const getVentasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, soloConP = true, empresa = 'ecobahia' }) => {
+const getVentasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, soloConP = true, empresa = 'ecobahia', sucursalRestringida = null }) => {
   if (!fechaDesde || !fechaHasta) {
     throw new Error('fechaDesde y fechaHasta son requeridos');
   }
@@ -69,36 +71,44 @@ const getVentasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, soloConP = t
   // cada línea a su documento correcto.
   const sopJoinCondSist2 = empresa === 'sist2' ? ' AND H.SOPTYPE = G.ORTRXTYP' : '';
 
-  const detalleRequest = bindFilters(pool.request());
-  const detalle = await detalleRequest.query(`
-    SELECT TOP (${MAX_ROWS})
-      NULLIF(LTRIM(RTRIM(H.PHONE3)), '') AS PHONE3,
-      LTRIM(RTRIM(H.DOCID)) AS DOCID,
-      LTRIM(RTRIM(G.ORDOCNUM)) AS Comprobante,
-      LTRIM(RTRIM(N.ACTNUMST)) AS Cuenta,
-      LTRIM(RTRIM(A.ACTDESCR)) AS CuentaDescripcion,
-      G.DEBITAMT,
-      G.CRDTAMNT${clienteSucursalSelect}
-    FROM GL20000 AS G
-    INNER JOIN GL00105 AS N ON N.ACTINDX = G.ACTINDX
-    INNER JOIN GL00100 AS A ON A.ACTINDX = G.ACTINDX
-    LEFT JOIN SOP30200 AS H ON LTRIM(RTRIM(H.SOPNUMBE)) = LTRIM(RTRIM(G.ORDOCNUM))${sopJoinCondSist2}
-    ${clienteSucursalJoin}
-    WHERE
-      LTRIM(RTRIM(G.SOURCDOC)) = 'SJ'
-      AND G.TRXDATE >= @fechaDesde
-      AND G.TRXDATE <= @fechaHasta
-      AND LTRIM(RTRIM(N.ACTNUMST)) <> @cuentaDeudores
-      AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%')
-    ORDER BY Cuenta ASC
-  `);
+  const [detalle, overridesMap] = await Promise.all([
+    bindFilters(pool.request()).query(`
+      SELECT TOP (${MAX_ROWS})
+        NULLIF(LTRIM(RTRIM(H.PHONE3)), '') AS PHONE3,
+        LTRIM(RTRIM(H.DOCID)) AS DOCID,
+        LTRIM(RTRIM(G.ORDOCNUM)) AS Comprobante,
+        LTRIM(RTRIM(N.ACTNUMST)) AS Cuenta,
+        LTRIM(RTRIM(A.ACTDESCR)) AS CuentaDescripcion,
+        G.DEBITAMT,
+        G.CRDTAMNT${clienteSucursalSelect}
+      FROM GL20000 AS G
+      INNER JOIN GL00105 AS N ON N.ACTINDX = G.ACTINDX
+      INNER JOIN GL00100 AS A ON A.ACTINDX = G.ACTINDX
+      LEFT JOIN SOP30200 AS H ON LTRIM(RTRIM(H.SOPNUMBE)) = LTRIM(RTRIM(G.ORDOCNUM))${sopJoinCondSist2}
+      ${clienteSucursalJoin}
+      WHERE
+        LTRIM(RTRIM(G.SOURCDOC)) = 'SJ'
+        AND G.TRXDATE >= @fechaDesde
+        AND G.TRXDATE <= @fechaHasta
+        AND LTRIM(RTRIM(N.ACTNUMST)) <> @cuentaDeudores
+        AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%')
+      ORDER BY Cuenta ASC
+    `),
+    getOverridesMap({ empresa, tipo: 'sucursal' }),
+  ]);
 
+  // Mismos overrides manuales que usa "Ventas por sucursal" (clasificacionOverrides.js) -
+  // antes este reporte los ignoraba del todo, así que un comprobante corregido a mano ahí
+  // (porque PHONE3 venía en blanco) no aparecía acá ni en el asiento - se notó al validar
+  // el acceso restringido por sucursal (un comprobante con override quedaba "En Blanco"
+  // en este reporte y por lo tanto invisible para un usuario restringido).
   const base = detalle.recordset.map((row) => {
-    const sucursal = empresa === 'sist2'
+    const sucursalCalculada = empresa === 'sist2'
       ? resolverSucursalSist2({ phone3: row.PHONE3, docid: row.DOCID, clienteUserdef2: row.ClienteSucursal })
       : row.PHONE3;
+    const override = overridesMap.get(row.Comprobante);
     return {
-      Sucursal: sucursal || MONEDA_VACIA,
+      Sucursal: override || sucursalCalculada || MONEDA_VACIA,
       Comprobante: row.Comprobante,
       Cuenta: row.Cuenta,
       CuentaDescripcion: row.CuentaDescripcion,
@@ -106,8 +116,12 @@ const getVentasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, soloConP = t
     };
   });
 
+  const baseVisible = sucursalRestringida
+    ? base.filter((row) => coincideSucursal(row.Sucursal, sucursalRestringida))
+    : base;
+
   const agrupado = new Map();
-  base.forEach((row) => {
+  baseVisible.forEach((row) => {
     const key = `${row.Sucursal}||${row.Cuenta}`;
     if (!agrupado.has(key)) {
       agrupado.set(key, { Sucursal: row.Sucursal, Cuenta: row.Cuenta, CuentaDescripcion: row.CuentaDescripcion, Monto: 0 });
@@ -122,7 +136,7 @@ const getVentasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, soloConP = t
   return {
     totalCount,
     truncated: totalCount > MAX_ROWS,
-    base,
+    base: baseVisible,
     baseColumns: ['Sucursal', 'Comprobante', 'Cuenta', 'CuentaDescripcion', 'Monto'],
     rows,
     columns: ['Sucursal', 'Cuenta', 'CuentaDescripcion', 'Monto'],
