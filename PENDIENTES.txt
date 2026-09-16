@@ -995,3 +995,38 @@ Exclusion de cuentas bancarias (ACCATNUM=22) en Compras por sucursal y por categ
   (no tenia cuentas bancarias de por medio). Compras por sucursal y cuenta sigue
   mostrando las lineas de banco (reporte sin filtrar, como corresponde). Asiento de
   compras sigue cerrando (diferencia ~0, redondeo de punto flotante).
+
+Libro IVA Digital (Ventas) - "cantidad de alicuotas menor a 1" rechazado por ARCA (2026-09-15)
+- El usuario reporto que ARCA rechazaba el .txt de Ventas con "cantidad de alicuotas
+  menor a 1" en 3 Notas de Debito A de agosto/2026 (NDPA0040-00000003/04/05). Su hipotesis
+  inicial fue que era mala carga en GP (falto marcar el importe del cheque como exento).
+- Investigado contra PRD08: la hipotesis del usuario NO era el problema - los 3
+  comprobantes SI estan correctamente cargados en GP como 100% exentos
+  (AWLI_IMPUESTOS tiene la linea "IVADF 0% EXE" con el importe completo en los 3). El
+  bug es del codigo: clasificarImpuestos() (libroIvaDigitalData.js) enruta las lineas
+  "0% EXE"/"0% NOGRAV" a importeExento/importeNoGravado pero nunca las contaba en el
+  array `alicuotas`, asi que un comprobante 100% exento/no-gravado (sin ninguna linea con
+  tasa > 0) quedaba con alicuotas.length=0 -> "cantidad de alicuotas"=0 en el .txt.
+- Se bajo el PDF oficial (Libro-IVA-Digital-Especificaciones.pdf, revision 30/07/2025) y
+  se confirmo el texto exacto: campo 19 (Ventas/Compras CBTE) "Cantidad de alicuotas de
+  IVA... En caso contrario se consignara '1'..."; campo 5/7 del archivo Alicuotas "La
+  alicuota podra ser cero en caso de operaciones... exentas y no gravadas"; campo 4/6
+  Importe Neto Gravado "Podra ser cero si la operacion no se encuentra gravada por IVA en
+  su totalidad". Es decir: un comprobante 100% exento/no-gravado SI necesita cantidad=1 y
+  una fila sintetica en el archivo de Alicuotas a tasa 0% con neto=0 - la falta de esa
+  fila sintetica es justo lo que ARCA rechaza.
+- Fix en clasificarImpuestos() (compartido por Ventas Y Compras, mismo bug potencial en
+  las dos): si `alicuotas` queda vacio Y hay importeExento>0 o importeNoGravado>0, se
+  agrega una fila sintetica {tasa:0, neto:0, iva:0} - alicuotaCodigo(0) ya mapeaba a
+  '0003' de antes, no hizo falta agregar nada a arcaCodes.js.
+- Efecto colateral encontrado y corregido: codigoOperacion() (libroIvaDigitalTxt.js)
+  asumia "si `alicuotas.length > 0` el codigo va en blanco" - con la fila sintetica esa
+  premisa se rompe (un comprobante exento ahora SI tiene 1 alicuota, pero a tasa 0, no
+  gravada). Se cambio la condicion a chequear especificamente si hay alguna alicuota con
+  tasa > 0 (`doc.alicuotas.some(al => al.tasa > 0)`), no solo si el array no esta vacio.
+- Validado contra datos reales (PRD08), no HTTP: se genero el CBTE y el archivo de
+  Alicuotas real para los 3 NDPA0040 reportados - cantidad de alicuotas=1, codigo de
+  operacion='E', importe exento correcto en cada linea, fila de alicuotas 0%/neto=0
+  presente. Un comprobante de control con IVA real (FVPA0040-00002045, 21%) no cambio de
+  comportamiento. Barrido completo Ventas+Compras enero-agosto/2026 (3764+1031
+  comprobantes): cero casos remanentes de "0 alicuotas con exento/no-gravado > 0".

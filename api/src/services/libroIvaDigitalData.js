@@ -63,6 +63,19 @@ function clasificarImpuestos(filas, esVenta) {
     .map(([tasa, v]) => ({ tasa, neto: v.neto, iva: v.iva }))
     .sort((a, b) => a.tasa - b.tasa);
 
+  // Comprobante 100% exento/no gravado (sin ninguna línea IVADF/IVACF con tasa > 0): el
+  // instructivo de ARCA exige igual "Cantidad de alícuotas = 1" (Especificaciones, campo
+  // 19 CBTE de Ventas/Compras: "En caso contrario se consignará '1'..."), con una fila en
+  // el archivo de Alícuotas a tasa 0% ("La alícuota podrá ser cero en caso de operaciones
+  // ... exentas y no gravadas"; el neto de esa fila "podrá ser cero" - campo 4/6 del
+  // archivo Alícuotas). Sin esto, ARCA rechaza el .txt entero con "cantidad de alícuotas
+  // menor a 1" - confirmado con 3 Notas de Débito A reales (agosto/2026) cargadas
+  // correctamente como exentas en GP (AWLI_IMPUESTOS "IVADF 0% EXE") que quedaban con
+  // alicuotas.length=0 antes de este fix.
+  if (alicuotas.length === 0 && (importeExento > 0 || importeNoGravado > 0)) {
+    alicuotas.push({ tasa: 0, neto: 0, iva: 0 });
+  }
+
   return { alicuotas, importeExento, importeNoGravado, percepcionIIBB, percepcionIVA, otrosTributos };
 }
 

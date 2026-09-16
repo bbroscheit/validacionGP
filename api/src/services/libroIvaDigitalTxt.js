@@ -17,9 +17,12 @@ const ANCHO = {
 
 // Código de operación (campo 20 en ambos CBTE): solo aplica cuando el comprobante no
 // tiene ninguna alícuota gravada > 0 (todo exento y/o no gravado). Con alícuotas
-// gravadas presentes va en blanco.
+// gravadas presentes va en blanco. OJO: no alcanza con mirar si `alicuotas` está vacío -
+// un comprobante 100% exento/no gravado trae una fila sintética a tasa 0% (ver
+// clasificarImpuestos en libroIvaDigitalData.js, requerida por ARCA para "Cantidad de
+// alícuotas"), así que hay que chequear específicamente que ninguna tasa sea > 0.
 function codigoOperacion(doc) {
-  if (doc.alicuotas.length > 0) return ' ';
+  if (doc.alicuotas.some((al) => al.tasa > 0)) return ' ';
   if (doc.importeExento > 0) return 'E';
   if (doc.importeNoGravado > 0) return 'N';
   return ' ';
