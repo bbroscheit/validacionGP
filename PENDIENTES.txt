@@ -1030,3 +1030,127 @@ Libro IVA Digital (Ventas) - "cantidad de alicuotas menor a 1" rechazado por ARC
   presente. Un comprobante de control con IVA real (FVPA0040-00002045, 21%) no cambio de
   comportamiento. Barrido completo Ventas+Compras enero-agosto/2026 (3764+1031
   comprobantes): cero casos remanentes de "0 alicuotas con exento/no-gravado > 0".
+
+Feature nueva: Bancos Cobranzas > Resumen (2026-09-15/16)
+- Pedido del usuario: pantalla nueva con 4 bancos (Credicoop, Frances, Provincia,
+  Chubut), cada uno con boton de subir su excel de movimientos (formato propio por
+  banco) y boton de descargar el mismo excel con una columna nueva "Numero de Cliente"
+  agregada - buscando cada movimiento por CUIT o nombre en la base de clientes de GP
+  (RM00101). Solo se implemento el parser de Credicoop por ahora (es el unico formato de
+  ejemplo que se tiene) - Frances/Provincia/Chubut quedan con el boton visible pero
+  avisando "Formato pendiente de implementar" hasta tener su excel de ejemplo.
+- Arquitectura: el cliente lee el .xlsx subido con la libreria xlsx (ya usada para
+  exportar) como array de arrays (fila 0 = encabezado, sin asumir nombres de columna -
+  cada banco trae columnas distintas), lo manda tal cual al endpoint nuevo
+  POST /bancos-cobranzas/:banco/procesar, y descarga el resultado con una funcion nueva
+  exportAoaToExcel (agregada a exportToExcel.js, hermana de exportToExcel/
+  exportToExcelMultiHoja pero para arrays en vez de objetos con columnas fijas).
+- api/src/services/clientesGp.js (nuevo): getClientesEcobahia()/buscarCliente({cuit,
+  nombre}) contra RM00101. El CUIT vive en TXRGNNUM (mismo campo que ya usa Libro IVA
+  Digital, con el codigo de documento pegado al final) - se valida que queden
+  exactamente 11 digitos antes de tratarlo como CUIT.
+- Bug de datos real encontrado y evitado: "99999999999" es el CUIT placeholder de
+  AFIP/ARCA para "Consumidor Final sin identificar" - 2 clientes de GP lo tienen cargado
+  asi. Sin excluirlo, cualquier movimiento con ese "CUIT" (o sin CUIT reconocible)
+  hubiera dado un falso "VARIOS" en vez de "NO ENCONTRADO". Se excluye explicitamente de
+  la busqueda por CUIT.
+- CUITs ambiguos (matchean mas de un cliente de GP - confirmados 66 casos reales,
+  normalmente el mismo cliente cargado una vez por sucursal, ej. CUIT 30546694719 =
+  cliente 96 "PREFECTURA NAVAL ARGENTINA" Y cliente 19855 "PREF. NAVAL ARGENTINA MDP", y
+  GP no tiene ningun campo que diga cual corresponde a una operacion puntual): a pedido
+  del usuario, se marcan como "VARIOS: <lista de numeros de cliente>" en vez de elegir
+  uno a ciegas, para que se revisen a mano.
+- Parser de Credicoop (api/src/routes/controllers/procesarCobranzasBanco.js): el CUIT no
+  viene en columna propia, esta incrustado en CONCEPTO junto con la descripcion
+  ("...Titular 30546694719-VAR-...", "...Ord.:30710472439-...", "...Cuit/l:20251348937-
+  ..." - variantes distintas, siempre 11 digitos aislados) - se extrae por regex. Si no
+  matchea, se prueba por nombre usando OBSERVACIONES (columna con el nombre ya limpio).
+  Confirmado con el usuario que la logica es CUIT primero, nombre de respaldo.
+- Validado contra datos reales (PRD08): se probaron filas reales de un excel de ejemplo
+  de Credicoop (Prefectura Naval -> VARIOS: 96, 19855; Vanesa Pintos Rosso -> 20131;
+  Laborem Certificacion -> 5032; Dominguez Claudio -> 1680; un CUIT que no existe en GP ->
+  NO ENCONTRADO). Validado tambien por HTTP real (servidor de prueba puerto 3011, cookie
+  JWT firmada): 200 con Credicoop, 500 con mensaje claro para un banco no implementado
+  (Frances), 401 sin cookie de sesion. Build de Next.js OK.
+- Pendiente: falta el excel de ejemplo de Frances, Provincia y Chubut para implementar
+  sus parsers (cada uno tiene su propio formato de columnas, confirmado por el usuario).
+
+Bancos Cobranzas - Frances implementado, reusando el parser de Credicoop (2026-09-16)
+- El usuario paso un excel real de Francés. Sorpresa: layout de columnas identico a
+  Credicoop (FECHA/CONCEPTO/IMPORTE/OBSERVACIONES/ESTADO) y misma convencion de CUIT
+  incrustado en CONCEPTO - Francés agrega ademas un formato "CTE <numero> [<codigo>]
+  NOMBRE" para transferencias locales (ademas de compartir el mismo formato
+  "Transf./DEBIN/Cuit:l" interbancario nacional que ya se veia en Credicoop - tiene
+  sentido, ese formato es del sistema de transferencias interbancarias, no de un banco
+  en particular).
+- El "codigo" intermedio del formato CTE (ej. "007-002389330101") NO es un CUIT - se
+  repite igual en comprobantes de empresas distintas (confirmado: aparece igual para
+  "GFV CONSTRUCCIONE", "ABM SERVICIOS IND" y "DESLER SA"). El regex de extraccion
+  (\b\d{11}\b, exige 11 digitos AISLADOS) ya lo ignoraba correctamente sin cambios porque
+  ese codigo nunca queda como un bloque limpio de exactamente 11 digitos.
+- Se renombro procesarCredicoop a procesarPorConceptoConCuit (mismo codigo, sin cambios
+  de logica) y se registro tambien para 'frances' en BANCOS_IMPLEMENTADOS - no hizo falta
+  escribir un parser nuevo.
+- Validado con filas reales del excel de Francés (las dos variantes del formato CTE, mas
+  las de transferencia interbancaria que ya se validaron con Credicoop): extraccion de
+  CUIT correcta en ambos casos, incluido un caso con codigo de 12 digitos tipo placeholder
+  ("000011111111") que correctamente no matchea nada. Build de Next.js OK (se marco
+  frances como implementado en la pantalla).
+- Sigue pendiente: Provincia y Chubut, todavia sin excel de ejemplo.
+
+Bancos Cobranzas - Provincia implementado, fix del regex de CUIT (2026-09-16)
+- El usuario paso un excel real de Provincia. Mismo layout de columnas otra vez
+  (FECHA/CONCEPTO/IMPORTE/OBSERVACIONES/ESTADO), pero encontro un caso que la regex vieja
+  (\b\d{11}\b) no manejaba: Provincia a veces pega el CUIT directo contra la primera
+  letra del nombre sin separador, ej. "CR.TRAN. 30664149113ECONSORCIO DE GESTION DEL
+  PUER 00X62" (CUIT=30664149113 pegado a "ECONSORCIO", la letra que se pega varia por
+  fila - "E" ahi, "D" en otra fila "33707907369DACONDICIONAD..." - no es parte del CUIT,
+  es puro pegado sin espacio). Como \b no es limite de palabra entre digito y letra (los
+  dos son \w), la regex vieja no encontraba el CUIT en estos casos.
+- Fix: CUIT_EN_TEXTO_RE paso de /\b(\d{11})\b/ a /(?<!\d)(\d{11})(?!\d)/ - la condicion
+  correcta es "no pegado a OTRO DIGITO" en ninguna punta (para seguir rechazando bloques
+  largos como el "007-002389330101" de Francés), no "rodeado de espacio". Deja pasar
+  letras pegadas (el caso de Provincia) pero sigue rechazando digitos pegados.
+  Se registro 'provincia' en BANCOS_IMPLEMENTADOS con el mismo procesarPorConceptoConCuit
+  (tercer banco que reusa el mismo parser sin cambios de logica, solo cambio el regex
+  compartido).
+- Tambien confirmado en Provincia: OBSERVACIONES no siempre es un nombre limpio (a veces
+  repite el CONCEPTO entero tal cual, con codigos y CUIT incluidos) - no se cambio nada
+  por esto, el respaldo por nombre simplemente matchea menos seguido ahi (no genera
+  matches incorrectos, solo menos recall en el respaldo - la mayoria de los casos ya
+  resuelven por CUIT).
+- Validado con 8 filas reales del excel de Provincia (los 3 sub-formatos: CUIT pegado a
+  letra, CUIT entre parentesis, CUIT con espacio limpio) - 7 resolvieron a un cliente
+  real de GP, 1 "NO ENCONTRADO" real (CUIT no cargado en GP). Corri de nuevo los casos ya
+  validados de Credicoop/Francés con el regex nuevo para confirmar que no se rompio nada
+  - mismos resultados que antes. Build de Next.js OK.
+- Sigue pendiente: Chubut, todavia sin excel de ejemplo.
+
+Bancos Cobranzas - Chubut implementado, ultimo de los 4 bancos (2026-09-16)
+- El usuario paso el excel de Chubut avisando que "es el mas problematico". Mismo layout
+  de columnas otra vez, y el parser compartido (procesarPorConceptoConCuit) lo manejo sin
+  ningun cambio de codigo - se valido explicitamente contra los casos mas raros de este
+  excel antes de darlo por bueno:
+  - Filas SIN ningun CUIT en CONCEPTO ("CRED DEBIN - CRED DEBIN", "MONCOBRA SUC
+    ARGENTINA") - caen bien al respaldo por nombre via OBSERVACIONES.
+  - Una fila con una nota manual en vez de dato real ("(NO TIENE DESCRIPCION... Suele
+    ser Moncobra)") - sin CUIT tampoco, pero OBSERVACIONES trae el nombre real
+    ("MONCOBRA SUC ARGENTINA") y resuelve igual por el respaldo.
+  - Dos filas con el MISMO CUIT (30703088534) pero nombres de persona distintos en
+    CONCEPTO ("JOEL EULOGIO ARROYO", "GERARDO JORGE SANDALI") y OBSERVACIONES que dice
+    "MERCADOLIBRE S.R.L." - probablemente ese CUIT es de un intermediario de pagos
+    (Mercado Pago) y no del pagador real. No se le hizo nada especial: el codigo busca
+    por el CUIT que hay, que es el unico dato de identidad real que manda el banco - en
+    este caso puntual ese CUIT no esta cargado en GP, asi que da "NO ENCONTRADO" sin
+    atribuir mal el pago a nadie. Si en el futuro se carga ese CUIT en GP bajo
+    "Mercadolibre SRL", los pagos de estas dos filas (y cualquier otro pago ruteado por
+    Mercado Pago) quedarian atribuidos a Mercadolibre, no al pagador real - queda
+    anotado por si en algun momento hay que revisar esto.
+  - La fila resaltada en amarillo por el usuario mismo en su excel ("CRED DEBIN - CRED
+    DEBIN", sin OBSERVACIONES ni ESTADO) no tiene ningun dato de identidad - da "NO
+    ENCONTRADO" correctamente, es un caso real sin forma de resolverse con la
+    informacion que manda el banco.
+- Se registro 'chubut' en BANCOS_IMPLEMENTADOS. Con esto quedan los 4 bancos pedidos
+  (Credicoop, Frances, Provincia, Chubut) funcionando con el mismo parser compartido, sin
+  haber necesitado escribir ningun parser especifico por banco mas alla del ajuste de
+  regex de la vuelta de Provincia. Build de Next.js OK.

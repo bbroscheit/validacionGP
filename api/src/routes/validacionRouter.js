@@ -21,6 +21,7 @@ const getCobranzasSist2 = require('./controllers/getCobranzasSist2.js');
 const getClientesSist2 = require('./controllers/getClientesSist2.js');
 const getCuentaCorrienteSist2 = require('./controllers/getCuentaCorrienteSist2.js');
 const { putOverrideClasificacion, deleteOverrideClasificacion } = require('./controllers/overridesClasificacion.js');
+const { procesarCobranzasBanco } = require('./controllers/procesarCobranzasBanco.js');
 const bloquearSiRestringido = require('../middlewares/bloquearSiRestringido.js');
 
 // Endpoint 1 - Ventas: SOP30200/SOP30300 filtrado por sucursal y fechas
@@ -305,6 +306,21 @@ validacionRouter.delete('/overrides/clasificacion', async (req, res) => {
     res.status(200).json({ eliminado });
   } catch (e) {
     console.log('error en DELETE /overrides/clasificacion', e.message);
+    res.status(500).json({ state: 'error', message: e.message });
+  }
+});
+
+// Bancos Cobranzas > Resumen: sube un excel de movimientos de un banco (formato propio
+// por banco) y devuelve el mismo excel con una columna "Número de Cliente" agregada,
+// buscando cada movimiento en la base de clientes de GP (RM00101) por CUIT o nombre.
+validacionRouter.post('/bancos-cobranzas/:banco/procesar', async (req, res) => {
+  try {
+    const { banco } = req.params;
+    const { filas } = req.body;
+    const data = await procesarCobranzasBanco({ banco, filas });
+    res.status(200).json({ filas: data });
+  } catch (e) {
+    console.log('error en POST /bancos-cobranzas/:banco/procesar', e.message);
     res.status(500).json({ state: 'error', message: e.message });
   }
 });

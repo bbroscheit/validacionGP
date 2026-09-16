@@ -50,6 +50,12 @@ const menus = [
       { href: "/reportes/sist2/cuenta-corriente", label: "Cuenta corriente de cliente" },
     ],
   },
+  {
+    label: "Bancos Cobranzas",
+    links: [
+      { href: "/bancos-cobranzas/resumen", label: "Resumen" },
+    ],
+  },
 ];
 
 export default function Nav({ usuario, onLogout }) {

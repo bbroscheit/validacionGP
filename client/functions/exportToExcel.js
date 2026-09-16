@@ -31,3 +31,16 @@ export function exportToExcelMultiHoja(sheets, filename) {
   });
   XLSX.writeFile(workbook, filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`);
 }
+
+// Para excels de terceros con columnas variables (Bancos Cobranzas): a diferencia de
+// exportToExcel/exportToExcelMultiHoja, acá las filas son arrays de celdas (fila 0 =
+// encabezado) en vez de objetos con columnas fijas - no hace falta saber los nombres de
+// columna de antemano, sirve para cualquier formato de banco.
+export function exportAoaToExcel(filas, filename) {
+  if (!filas || filas.length === 0) return;
+
+  const worksheet = XLSX.utils.aoa_to_sheet(filas);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Datos");
+  XLSX.writeFile(workbook, filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`);
+}
