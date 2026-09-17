@@ -34,6 +34,18 @@ const { getOverridesMap } = require('../../services/clasificacionOverrides');
 //   - Las cuentas de impuestos (ACCATNUM=9: IVA Crédito Fiscal y percepciones).
 // Todo lo demás (gastos, activo, préstamos) es Neto. No debería haber saldos negativos
 // salvo Notas de crédito.
+//
+// Un mismo asiento puede prorratear una línea entre VARIAS zonas (Contabilidad Analítica
+// permite distribuir por porcentaje, ej. 46% Bahía Blanca / 15% Puerto Madryn / ... - GP
+// lo llama "Distribución"). El join de AADetalle tiene que ser por
+// JRNENTRY+ACTINDX+SEQNUMBR (el número de línea real dentro del asiento, confirmado
+// contra PRD08 que GL20000.SEQNUMBR = AATransactions."Número de secuencia") y agrupar
+// además por "Id. de asignación de contabilidad analítica" (una fila de Contabilidad
+// Analítica por cada % de la distribución) - agrupar solo por JRNENTRY+ACTINDX (como
+// estaba antes) colapsaba TODA la distribución en una sola zona (la que ganaba el MAX()),
+// mostrando el importe entero ahí en vez de prorratearlo. Validado contra PRD08: sumando
+// por SEQNUMBR, el total de Contabilidad Analítica cierra exacto contra GL20000 en el
+// 100% de compras 2026 (0 diferencias) - confirma que es la clave correcta.
 const MONEDA_VACIA = 'En Blanco';
 const CUENTAS_CONTRAPARTIDA = ['211101-01-000', '223202-01-000'];
 const ACCATNUM_IMPUESTOS = 9;
@@ -99,12 +111,16 @@ const getComprasPorSucursal = async ({ fechaDesde, fechaHasta, sucursalRestringi
         SELECT
           A.[Entrada de diario] AS JRNENTRY,
           A.[Índice de cuenta] AS ACTINDX,
+          A.[Número de secuencia] AS SEQNUMBR,
+          A.[Id. de asignación de contabilidad analítica] AS ASIGNID,
           MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'ZONA'
               THEN NULLIF(LTRIM(RTRIM(A.[Cód. de dimensión de trans.])), '') END) AS ZONA,
           MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'ZONA'
-              THEN NULLIF(LTRIM(RTRIM(A.[Descripción del código de dimensión de transacción])), '') END) AS ZONA_DESC
+              THEN NULLIF(LTRIM(RTRIM(A.[Descripción del código de dimensión de transacción])), '') END) AS ZONA_DESC,
+          MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'ZONA' THEN A.[Monto débito] END) AS AA_DEBITAMT,
+          MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'ZONA' THEN A.[Monto crédito] END) AS AA_CRDTAMNT
         FROM dbo.AATransactions A
-        GROUP BY A.[Entrada de diario], A.[Índice de cuenta]
+        GROUP BY A.[Entrada de diario], A.[Índice de cuenta], A.[Número de secuencia], A.[Id. de asignación de contabilidad analítica]
       )
       SELECT TOP (${MAX_ROWS})
         NULLIF(UPPER(LTRIM(RTRIM(AA.ZONA_DESC))), '') AS Sucursal,
@@ -116,12 +132,12 @@ const getComprasPorSucursal = async ({ fechaDesde, fechaHasta, sucursalRestringi
         LTRIM(RTRIM(N.ACTNUMST)) AS Cuenta,
         LTRIM(RTRIM(A.ACTDESCR)) AS CuentaDescripcion,
         A.ACCATNUM,
-        G.DEBITAMT,
-        G.CRDTAMNT
+        COALESCE(AA.AA_DEBITAMT, G.DEBITAMT) AS DEBITAMT,
+        COALESCE(AA.AA_CRDTAMNT, G.CRDTAMNT) AS CRDTAMNT
       FROM GL20000 AS G
       INNER JOIN GL00105 AS N ON N.ACTINDX = G.ACTINDX
       INNER JOIN GL00100 AS A ON A.ACTINDX = G.ACTINDX
-      LEFT JOIN AADetalle AS AA ON AA.JRNENTRY = G.JRNENTRY AND AA.ACTINDX = G.ACTINDX
+      LEFT JOIN AADetalle AS AA ON AA.JRNENTRY = G.JRNENTRY AND AA.ACTINDX = G.ACTINDX AND AA.SEQNUMBR = G.SEQNUMBR
       LEFT JOIN PM00200 AS V ON LTRIM(RTRIM(V.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
       WHERE
         LTRIM(RTRIM(G.SOURCDOC)) IN ('PMTRX', 'PMVVR')

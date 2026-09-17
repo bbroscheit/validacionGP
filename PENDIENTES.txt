@@ -1154,3 +1154,52 @@ Bancos Cobranzas - Chubut implementado, ultimo de los 4 bancos (2026-09-16)
   (Credicoop, Frances, Provincia, Chubut) funcionando con el mismo parser compartido, sin
   haber necesitado escribir ningun parser especifico por banco mas alla del ajuste de
   regex de la vuelta de Provincia. Build de Next.js OK.
+
+Fix: comprobantes con distribucion por % entre varias zonas mostraban todo el importe en una sola (2026-09-16)
+- El usuario reporto (con capturas reales de GP) que la factura de YPF FC A1420-00299814
+  esta distribuida en Contabilidad Analitica entre 6 zonas por porcentaje (46% Bahia
+  Blanca, 15% Puerto Madryn, 17% Mar Del Plata, 8% La Pampa, 4% Tandil, 10%
+  Emprendimientos - $11.051,38 en total), pero en "Compras por sucursal" aparecia entero
+  en una sola zona. El total general del reporte estaba bien (el usuario lo aclaro
+  explicitamente) - el problema era solo la distribucion entre sucursales.
+- Causa raiz: el CTE "AADetalle" que arman todos los reportes de compras basados en
+  Contabilidad Analitica agrupaba por JRNENTRY+ACTINDX nada mas, usando MAX() para
+  "elegir" una sola ZONA por grupo. Cuando un asiento reparte una linea entre varias zonas
+  (AATransactions trae una fila por cada % de la distribucion, todas con el mismo
+  JRNENTRY+ACTINDX), el MAX() colapsaba todo el reparto en una sola zona (la que ganaba
+  alfabeticamente), mostrando el importe COMPLETO ahi.
+- Investigado a fondo contra PRD08 para encontrar la clave de join correcta:
+  AATransactions."Número de secuencia" = GL20000.SEQNUMBR (confirmado exacto) identifica
+  la LINEA especifica dentro del asiento (necesario porque un mismo asiento puede tener
+  DOS lineas en la MISMA cuenta - 23 casos reales encontrados en 2026 - y JRNENTRY+ACTINDX
+  solo no alcanza para distinguirlas, causaba ademas una colision de datos entre lineas
+  distintas). Y "Id. de asignación de contabilidad analítica" identifica cada % de la
+  distribucion dentro de esa linea (una fila ZONA + una fila CENTRO DE COSTO por
+  asignacion, mismo Monto debito/credito en las dos). Validado: agrupando por
+  JRNENTRY+ACTINDX+SEQNUMBR+AsignId y sumando el "Monto débito"-"Monto crédito" de
+  AATransactions (dimension ZONA), el total cierra EXACTO contra GL20000.DEBITAMT-CRDTAMNT
+  en el 100% de las lineas de compras de 2026, cero diferencias.
+- Fix aplicado en los reportes que agregan por sucursal, donde SI importa prorratear
+  correctamente:
+  - getComprasPorSucursal.js: AADetalle ahora agrupa por
+    JRNENTRY+ACTINDX+SEQNUMBR+AsignId, trae tambien el Monto debito/credito propio de
+    AATransactions, y el join a GL20000 exige tambien SEQNUMBR. El SELECT usa
+    COALESCE(AA.monto, G.monto) - si no hay Contabilidad Analitica cargada, usa el monto
+    completo de la linea (comportamiento anterior, "En Blanco"); si hay 1 o mas
+    asignaciones, se genera una fila por cada una con SU propio monto.
+  - getComprasPorSucursalCuenta.js: mismo fix exacto (mismo patron de CTE).
+  - getSucursalesCompras.js (dropdown de sucursales): se agrego SEQNUMBR al join por
+    consistencia - bajo riesgo/impacto, es solo una lista de valores distintos.
+  - getGastos.js (grupo "compras"): fix PARCIAL - se agrego SEQNUMBR al join (arregla la
+    colision entre lineas distintas en la misma cuenta, los 23 casos) pero NO se prorratea
+    el importe entre zonas cuando una linea tiene mas de una - este reporte trae G.* (la
+    linea de GL20000 completa, sin agrupar por comprobante) y hacerlo bien ahi implica una
+    reestructuracion mas grande (no se puede simplemente pisar G.DEBITAMT/CRDTAMNT con un
+    alias del mismo nombre sin ambiguedad). Queda documentado como limitacion conocida -
+    si hace falta, es un cambio aparte a pedir explicitamente.
+- Validado contra datos reales (PRD08), no HTTP: la factura de YPF ahora aparece como 6
+  filas (una por zona) en Compras por sucursal Y en Compras por sucursal y cuenta, cada
+  una con su monto correcto, sumando exacto $11.051,38. El total general de agosto/2026 en
+  Compras por sucursal NO cambio (sigue en $591.192.596,58, tal como dijo el usuario que
+  debia pasar). Barrido amplio (enero-agosto/2026, ~3700-4700 filas segun reporte) sin
+  errores en los 4 controllers tocados.

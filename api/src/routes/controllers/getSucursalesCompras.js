@@ -11,14 +11,15 @@ const getSucursalesCompras = async () => {
       SELECT
         A.[Entrada de diario] AS JRNENTRY,
         A.[Índice de cuenta] AS ACTINDX,
+        A.[Número de secuencia] AS SEQNUMBR,
         MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'ZONA'
             THEN NULLIF(LTRIM(RTRIM(A.[Descripción del código de dimensión de transacción])), '') END) AS ZONA_DESC
       FROM dbo.AATransactions A
-      GROUP BY A.[Entrada de diario], A.[Índice de cuenta]
+      GROUP BY A.[Entrada de diario], A.[Índice de cuenta], A.[Número de secuencia]
     )
     SELECT DISTINCT UPPER(LTRIM(RTRIM(AA.ZONA_DESC))) AS Sucursal
     FROM GL20000 AS G
-    INNER JOIN AADetalle AS AA ON AA.JRNENTRY = G.JRNENTRY AND AA.ACTINDX = G.ACTINDX
+    INNER JOIN AADetalle AS AA ON AA.JRNENTRY = G.JRNENTRY AND AA.ACTINDX = G.ACTINDX AND AA.SEQNUMBR = G.SEQNUMBR
     WHERE LTRIM(RTRIM(G.SOURCDOC)) IN ('PMTRX', 'PMVVR')
       AND LTRIM(RTRIM(AA.ZONA_DESC)) <> ''
     ORDER BY Sucursal ASC

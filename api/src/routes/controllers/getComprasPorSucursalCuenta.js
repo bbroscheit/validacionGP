@@ -15,6 +15,11 @@ const { getOverridesMap } = require('../../services/clasificacionOverrides');
 //
 // Igual que en Gastos/Compras por sucursal: GL20000.VOIDED no sirve (siempre da 0), se
 // cruza contra PM30200/PM20000.VOIDED=1 por DOCNUMBR+VENDORID.
+//
+// Igual que en Compras por sucursal: el join de AADetalle es por
+// JRNENTRY+ACTINDX+SEQNUMBR (no solo JRNENTRY+ACTINDX) y agrupado también por "Id. de
+// asignación de contabilidad analítica", para no colapsar una línea prorrateada entre
+// varias zonas en una sola (ver el comentario largo en getComprasPorSucursal.js).
 const MONEDA_VACIA = 'En Blanco';
 const MAX_ROWS = 100000;
 
@@ -67,24 +72,28 @@ const getComprasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, sucursalRes
         SELECT
           A.[Entrada de diario] AS JRNENTRY,
           A.[Índice de cuenta] AS ACTINDX,
+          A.[Número de secuencia] AS SEQNUMBR,
+          A.[Id. de asignación de contabilidad analítica] AS ASIGNID,
           MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'ZONA'
               THEN NULLIF(LTRIM(RTRIM(A.[Cód. de dimensión de trans.])), '') END) AS ZONA,
           MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'ZONA'
-              THEN NULLIF(LTRIM(RTRIM(A.[Descripción del código de dimensión de transacción])), '') END) AS ZONA_DESC
+              THEN NULLIF(LTRIM(RTRIM(A.[Descripción del código de dimensión de transacción])), '') END) AS ZONA_DESC,
+          MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'ZONA' THEN A.[Monto débito] END) AS AA_DEBITAMT,
+          MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'ZONA' THEN A.[Monto crédito] END) AS AA_CRDTAMNT
         FROM dbo.AATransactions A
-        GROUP BY A.[Entrada de diario], A.[Índice de cuenta]
+        GROUP BY A.[Entrada de diario], A.[Índice de cuenta], A.[Número de secuencia], A.[Id. de asignación de contabilidad analítica]
       )
       SELECT TOP (${MAX_ROWS})
         NULLIF(UPPER(LTRIM(RTRIM(AA.ZONA_DESC))), '') AS Sucursal,
         LTRIM(RTRIM(G.ORDOCNUM)) AS Comprobante,
         LTRIM(RTRIM(N.ACTNUMST)) AS Cuenta,
         LTRIM(RTRIM(A.ACTDESCR)) AS CuentaDescripcion,
-        G.DEBITAMT,
-        G.CRDTAMNT
+        COALESCE(AA.AA_DEBITAMT, G.DEBITAMT) AS DEBITAMT,
+        COALESCE(AA.AA_CRDTAMNT, G.CRDTAMNT) AS CRDTAMNT
       FROM GL20000 AS G
       INNER JOIN GL00105 AS N ON N.ACTINDX = G.ACTINDX
       INNER JOIN GL00100 AS A ON A.ACTINDX = G.ACTINDX
-      LEFT JOIN AADetalle AS AA ON AA.JRNENTRY = G.JRNENTRY AND AA.ACTINDX = G.ACTINDX
+      LEFT JOIN AADetalle AS AA ON AA.JRNENTRY = G.JRNENTRY AND AA.ACTINDX = G.ACTINDX AND AA.SEQNUMBR = G.SEQNUMBR
       WHERE
         LTRIM(RTRIM(G.SOURCDOC)) IN ('PMTRX', 'PMVVR')
         AND G.TRXDATE >= @fechaDesde

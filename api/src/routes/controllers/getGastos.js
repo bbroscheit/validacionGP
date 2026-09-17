@@ -122,8 +122,19 @@ const getGastos = async ({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, emp
   // GP, no se investigó todavía cómo mapea. Por eso el join de dimensión solo se arma
   // para 'ecobahia' - para el resto, Zona/Centro quedan en blanco en vez de romper el
   // endpoint.
+  // OJO (2026-09-16): a diferencia de Compras por sucursal/por sucursal y cuenta, acá NO
+  // se prorratea el importe entre las zonas cuando un asiento distribuye una línea por
+  // porcentaje entre varias (ver el comentario largo en getComprasPorSucursal.js) - este
+  // reporte trae la línea de GL20000 tal cual (G.*, con su DEBITAMT/CRDTAMNT completo), y
+  // solo arma un fix parcial: el join ahora es por JRNENTRY+ACTINDX+SEQNUMBR (no solo
+  // JRNENTRY+ACTINDX) para al menos no mezclar dos líneas DISTINTAS que comparten cuenta
+  // dentro del mismo asiento (confirmado un puñado de casos reales así en PRD08 - sin
+  // esto, la Zona/Centro de una línea se le podía pegar a otra). Si la línea en sí tiene
+  // más de una zona (distribución por %), acá se sigue viendo solo una (la que gane el
+  // MAX()) con el importe completo de la línea - pendiente de resolver si hace falta acá
+  // también, es un cambio más grande porque este reporte no agrupa por comprobante.
   const aaJoin = empresa === 'ecobahia'
-    ? `LEFT JOIN AADetalle AS AA ON AA.JRNENTRY = G.JRNENTRY AND AA.ACTINDX = G.ACTINDX`
+    ? `LEFT JOIN AADetalle AS AA ON AA.JRNENTRY = G.JRNENTRY AND AA.ACTINDX = G.ACTINDX AND AA.SEQNUMBR = G.SEQNUMBR`
     : '';
   const aaSelect = empresa === 'ecobahia'
     ? 'AA.ZONA, AA.ZONA_DESC, AA.ID_CENTRO, AA.CENTRO_DESC'
@@ -133,6 +144,7 @@ const getGastos = async ({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, emp
         SELECT
           A.[Entrada de diario] AS JRNENTRY,
           A.[Índice de cuenta] AS ACTINDX,
+          A.[Número de secuencia] AS SEQNUMBR,
           MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'ZONA'
               THEN NULLIF(LTRIM(RTRIM(A.[Cód. de dimensión de trans.])), '') END) AS ZONA,
           MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'ZONA'
@@ -142,7 +154,7 @@ const getGastos = async ({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, emp
           MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'CENTRO DE COSTO'
               THEN NULLIF(LTRIM(RTRIM(A.[Descripción del código de dimensión de transacción])), '') END) AS CENTRO_DESC
         FROM dbo.AATransactions A
-        GROUP BY A.[Entrada de diario], A.[Índice de cuenta]
+        GROUP BY A.[Entrada de diario], A.[Índice de cuenta], A.[Número de secuencia]
       )`
     : '';
 
