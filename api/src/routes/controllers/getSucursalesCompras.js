@@ -1,11 +1,13 @@
-const { getGpPoolEcobahia } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas } = require('../../config/gpPool');
+
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas };
 
 // Lista de sucursales (zona de Contabilidad Analítica, descripción normalizada) para
 // poblar el selector de los reportes de compras - mismo criterio que
 // getComprasPorSucursal.js: se agrupa por descripción en mayúsculas porque el código de
 // zona cambió durante julio/2026 y la escritura de la descripción tampoco es 100% estable.
-const getSucursalesCompras = async () => {
-  const pool = await getGpPoolEcobahia();
+const getSucursalesCompras = async ({ empresa = 'ecobahia' } = {}) => {
+  const pool = await POOLS[empresa]();
   const result = await pool.request().query(`
     WITH AADetalle AS (
       SELECT

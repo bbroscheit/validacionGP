@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { sucursalDeSesion } = require('../services/autorizacion.js');
+const { sucursalDeSesion, emprendimientoDeSesion } = require('../services/autorizacion.js');
 
 const { JWT_SECRET } = process.env;
 
@@ -10,6 +10,8 @@ const { JWT_SECRET } = process.env;
 // Además calcula req.sucursalRestringida (services/autorizacion.js, a partir del "o" de
 // AD): null si el usuario tiene acceso completo, o el nombre de sucursal al que queda
 // limitado - los controllers/rutas lo usan para filtrar o bloquear según corresponda.
+// Y req.emprendimiento ('ecobahia' | 'ecosistemas'): a qué base de datos de GP apuntan
+// todas las consultas de esta sesión, según la compañía de AD del usuario.
 const requireAuth = (req, res, next) => {
   const token = req.cookies?.token;
   if (!token) {
@@ -19,6 +21,7 @@ const requireAuth = (req, res, next) => {
   try {
     req.usuario = jwt.verify(token, JWT_SECRET);
     req.sucursalRestringida = sucursalDeSesion(req.usuario);
+    req.emprendimiento = emprendimientoDeSesion(req.usuario);
     next();
   } catch (e) {
     res.status(401).json({ state: 'error', message: 'Sesión inválida o vencida' });

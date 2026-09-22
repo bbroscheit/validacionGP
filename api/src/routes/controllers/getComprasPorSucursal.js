@@ -1,6 +1,8 @@
-const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, sql } = require('../../config/gpPool');
 const { coincideSucursal } = require('../../services/autorizacion');
 const { getOverridesMap } = require('../../services/clasificacionOverrides');
+
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas };
 
 // Reporte - Compras por sucursal (zona de Contabilidad Analítica)
 // A diferencia de Ventas, las compras (PM10000/PM20000/PM30200) no tienen un campo de
@@ -46,18 +48,38 @@ const { getOverridesMap } = require('../../services/clasificacionOverrides');
 // mostrando el importe entero ahí en vez de prorratearlo. Validado contra PRD08: sumando
 // por SEQNUMBR, el total de Contabilidad Analítica cierra exacto contra GL20000 en el
 // 100% de compras 2026 (0 diferencias) - confirma que es la clave correcta.
+//
+// OJO: ACCATNUM y los números de cuenta son configuración propia de cada compañía GP -
+// NO son códigos universales. Confirmado que el mismo ACCATNUM significa algo distinto
+// en cada base (ej. ACCATNUM=9 es "Créditos Fiscales" en PRD08 pero "Obras en
+// Construcción" en PRD02) y las cuentas de contrapartida tampoco existen igual (PRD08 usa
+// 211101/223202, PRD02 usa 211110/211210). Por eso este mapeo está indexado por empresa -
+// los valores de Ecosistemas se confirmaron contra el plan de cuentas real de PRD02
+// (GL00100/GL00102): categoría 37 = "Créditos Fiscales", categoría 22 = "Bancos" (coincide
+// con PRD08), 211110-01-000 = "PROVEEDORES", 211210-01-000 = "TARJETA CORPORATIVA VISA -
+// CREDICOOP".
 const MONEDA_VACIA = 'En Blanco';
-const CUENTAS_CONTRAPARTIDA = ['211101-01-000', '223202-01-000'];
-const ACCATNUM_IMPUESTOS = 9;
-const ACCATNUM_BANCOS = 22;
+const CONFIG_EMPRESA = {
+  ecobahia: {
+    cuentasContrapartida: ['211101-01-000', '223202-01-000'],
+    accatnumImpuestos: 9,
+    accatnumBancos: 22,
+  },
+  ecosistemas: {
+    cuentasContrapartida: ['211110-01-000', '211210-01-000'],
+    accatnumImpuestos: 37,
+    accatnumBancos: 22,
+  },
+};
 const MAX_ROWS = 100000;
 
-const getComprasPorSucursal = async ({ fechaDesde, fechaHasta, sucursalRestringida = null }) => {
+const getComprasPorSucursal = async ({ fechaDesde, fechaHasta, empresa = 'ecobahia', sucursalRestringida = null }) => {
   if (!fechaDesde || !fechaHasta) {
     throw new Error('fechaDesde y fechaHasta son requeridos');
   }
 
-  const pool = await getGpPoolEcobahia();
+  const pool = await POOLS[empresa]();
+  const { cuentasContrapartida: CUENTAS_CONTRAPARTIDA, accatnumBancos: ACCATNUM_BANCOS, accatnumImpuestos: ACCATNUM_IMPUESTOS } = CONFIG_EMPRESA[empresa];
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
@@ -148,7 +170,7 @@ const getComprasPorSucursal = async ({ fechaDesde, fechaHasta, sucursalRestringi
         ${noAnuladaWhere}
       ORDER BY Sucursal ASC, G.TRXDATE ASC
     `),
-    getOverridesMap({ empresa: 'ecobahia', tipo: 'zona' }),
+    getOverridesMap({ empresa, tipo: 'zona' }),
   ]);
 
   // Overrides manuales (clasificacionOverrides.js, tipo "zona" - separado de "sucursal"

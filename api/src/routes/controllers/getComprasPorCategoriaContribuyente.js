@@ -1,4 +1,6 @@
-const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, sql } = require('../../config/gpPool');
+
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas };
 
 // Reporte - Compras por categoría de cuenta y tipo de contribuyente
 // Mismo esquema que getVentasPorCategoriaContribuyente.js pero para compras: GL20000
@@ -15,6 +17,10 @@ const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
 // (ACCATNUM=9: IVA Crédito Fiscal y percepciones).
 // Igual que en Gastos/Compras: GL20000.VOIDED no sirve (siempre da 0), se cruza contra
 // PM30200/PM20000.VOIDED=1 por DOCNUMBR+VENDORID.
+//
+// OJO: estos números (ACCATNUM y cuentas) son configuración propia de cada compañía GP,
+// no códigos universales - ver el mismo comentario en getComprasPorSucursal.js. Mapeo de
+// Ecosistemas (PRD02) confirmado contra su plan de cuentas real.
 //
 // RI (Gravado) vs RI (No Gravado): dentro de "RI" hay comprobantes que mezclan, en el
 // MISMO comprobante, un tramo gravado y un tramo no gravado (ej. FC A0044-00123808:
@@ -33,19 +39,29 @@ const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
 // entero a "RI (No Gravado)". Solo se splitea RI - el resto de los tipos de
 // contribuyente quedan como están.
 const MONEDA_VACIA = 'En Blanco';
-const CUENTAS_CONTRAPARTIDA = ['211101-01-000', '223202-01-000'];
-const ACCATNUM_IMPUESTOS = 9;
-const ACCATNUM_BANCOS = 22;
+const CONFIG_EMPRESA = {
+  ecobahia: {
+    cuentasContrapartida: ['211101-01-000', '223202-01-000'],
+    accatnumImpuestos: 9,
+    accatnumBancos: 22,
+  },
+  ecosistemas: {
+    cuentasContrapartida: ['211110-01-000', '211210-01-000'],
+    accatnumImpuestos: 37,
+    accatnumBancos: 22,
+  },
+};
 const MAX_ROWS = 100000;
 const TAXDTLID_GRAVADO = ['IVACF 10.5%', 'IVACF 21%', 'IVACF 27%'];
 const TAXDTLID_NO_GRAVADO = ['IVACF 0% NOGRAV', 'IVACF 0% EXE'];
 
-const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta }) => {
+const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta, empresa = 'ecobahia' }) => {
   if (!fechaDesde || !fechaHasta) {
     throw new Error('fechaDesde y fechaHasta son requeridos');
   }
 
-  const pool = await getGpPoolEcobahia();
+  const pool = await POOLS[empresa]();
+  const { cuentasContrapartida: CUENTAS_CONTRAPARTIDA, accatnumImpuestos: ACCATNUM_IMPUESTOS, accatnumBancos: ACCATNUM_BANCOS } = CONFIG_EMPRESA[empresa];
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));

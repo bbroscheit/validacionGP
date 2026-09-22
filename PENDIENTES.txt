@@ -1203,3 +1203,82 @@ Fix: comprobantes con distribucion por % entre varias zonas mostraban todo el im
   Compras por sucursal NO cambio (sigue en $591.192.596,58, tal como dijo el usuario que
   debia pasar). Barrido amplio (enero-agosto/2026, ~3700-4700 filas segun reporte) sin
   errores en los 4 controllers tocados.
+
+Feature: segundo emprendimiento "Ecosistemas Patagonicos" (PRD02) (2026-09-21)
+- La empresa tiene varios "emprendimientos" (unidades de negocio), cada uno con su propia
+  base de Dynamics GP. Hasta ahora la app solo conocia Ecobahia (PRD08 + su sistema
+  secundario sist2). Se agrego Ecosistemas Patagonicos (PRD02), mismo servidor SQL2-BA y
+  mismas credenciales, sin sist2. Cada usuario ve solo los reportes de SU compania segun
+  el campo `company`/`organizacion` de su perfil de Active Directory (mismo mecanismo que
+  ya resolvia sucursal restringida dentro de Ecobahia) - usuario de prueba real: AnguloFN,
+  compania "Ecosistemas Patagonicos".
+- Concepto nuevo `emprendimiento` ('ecobahia'|'ecosistemas'), separado del `empresa` que ya
+  existia ('ecobahia'|'sist2', un toggle que el cliente elige a mano en algunos reportes de
+  Ventas/Gastos). Se resuelve server-side en validacionRouter.js:
+  `resolverEmpresa(req) = req.emprendimiento === 'ecosistemas' ? 'ecosistemas' : (req.query.empresa || 'ecobahia')`
+  - preserva 100% el comportamiento de Ecobahia (sigue pudiendo elegir empresa=sist2 donde
+  ya existia) y fuerza 'ecosistemas' para esos usuarios sin importar que mande el cliente.
+- api/src/services/autorizacion.js: `emprendimientoDeSesion()` nueva, "ECOSISTEMAS
+  PATAGONICOS" agregado a `esAccesoCompleto` (no tiene sucursales) y a la lista blanca de
+  login (`tieneAccesoALaApp`). Middleware nuevo `soloEcobahia.js` (403 si
+  `req.emprendimiento !== 'ecobahia'`) aplicado a las 3 rutas /reportes/sist2/* y a
+  /bancos-cobranzas/:banco/procesar (Bancos Cobranzas queda Ecobahia-only por ahora,
+  Ecosistemas no tiene sist2 ni Cobranzas/Cuenta-corriente).
+- api/src/config/gpConfig.js + gpPool.js: pool nuevo `getGpPoolEcosistemas()` (mismo
+  patron que Ecobahia, solo cambia `database` a PRD02 via env var GP_DATABASE_ECOSISTEMAS).
+  17 controllers/servicios recibieron el parametro `empresa` (agregandolo donde no existia,
+  o sumando la entrada 'ecosistemas' al mapa de pools donde ya existia el patron), incluido
+  libroIvaDigitalData.js (fetchVentas/fetchCompras).
+- Confirmado por exploracion directa contra PRD02 (antes de escribir codigo): mismas
+  tablas/columnas que PRD08 en todo lo relevante (SOP30200, PM30200, PM20000, PM00200,
+  RM00101, GL20000, GL00100, GL00105, AATransactions, AWLI_IMPUESTOS, AWLI_PM00200,
+  II_DATOS_CLIE, DYNAMICS..AWLI40330 cross-database) - a diferencia de sist2 que tiene un
+  esquema realmente distinto. AATransactions esta vacia en PRD02 hoy (sin sucursales
+  cargadas), los LEFT JOIN existentes ya devuelven "En Blanco" sin necesitar ninguna rama
+  especial. SOP30200.PHONE3 SI tiene datos reales ("1. BASE NEUQUEN", etc.) - Ventas por
+  sucursal muestra datos reales de Ecosistemas, no solo "En Blanco".
+- HALLAZGO IMPORTANTE (no estaba contemplado en el plan original): ACCATNUM (categoria de
+  cuenta contable de GP) y los numeros de cuenta puntuales son configuracion PROPIA de cada
+  compania GP, no codigos universales - confirmado contra el plan de cuentas real de PRD02
+  (tabla GL00102). Ejemplo: ACCATNUM=9 es "Creditos Fiscales" (IVA) en PRD08 pero "Obras en
+  Construccion" (activo fijo) en PRD02 - un reporte que hardcodeaba 9 como "Impuestos"
+  hubiera clasificado mal los datos de Ecosistemas, y de hecho el Neto de Compras por
+  sucursal daba ~$0 con los numeros de Ecobahia (todo se excluia por error). Se encontraron
+  y corrigieron 4 archivos con esta trampa, ahora con un mapa CONFIG_EMPRESA indexado por
+  `empresa` en cada uno (valores de Ecosistemas confirmados contra GL00100/GL00102 real):
+  - getComprasPorSucursal.js / getComprasPorCategoriaContribuyente.js: Impuestos
+    PRD08=cat.9 / PRD02=cat.37. Bancos PRD08=cat.22 / PRD02=cat.22 (coincide, confirmado con
+    cuentas reales: Credicoop, BPN, Banco Nacion, Mercado Pago). Cuentas de contrapartida de
+    pago PRD08=['211101-01-000','223202-01-000'] (Proveedores/Visa Frances) / PRD02=
+    ['211110-01-000','211210-01-000'] (Proveedores/Tarjeta Corporativa Visa-Credicoop, cta y
+    categoria distintas a la de Ecobahia).
+  - getVentasPorCategoriaContribuyente.js: Impuestos PRD08=cat.30 / PRD02=cat.13 (IVA Saldo
+    a Pagar/Debito Fiscal/Retenciones). Cuenta deudores PRD08='113110-01-000' / PRD02=
+    '112110-02-000' (DEUDORES POR VENTAS).
+  - getGastos.js: categoria de "gasto real" para aislar pagos OPV/EGRE, PRD08/sist2=[16,17]
+    (Egresos Operativos + No Operativos, comparten base PRD08) / PRD02=[26] unicamente -
+    Ecosistemas no tiene categoria separada de "No Operativos" en su plan de cuentas
+    (decision del usuario: usar solo la que existe hoy, revisar si en el futuro agregan una
+    categoria nueva).
+- Validado el mapeo corregido contra datos reales de PRD02 (ene-ago/2026): Compras por
+  sucursal Neto ~$1.429.363.796 / Impuestos ~$236.664.748 (ambos positivos y razonables,
+  vs. ~$0/$0 con los numeros de Ecobahia). El total de Ventas por categoria/contribuyente
+  ($4.691.338.536,70) cierra EXACTO contra el Neto de Ventas por sucursal del mismo rango -
+  mismo chequeo cruzado que ya se usaba para validar Ecobahia. Gastos-OPV: 246 filas reales
+  encontradas para Ecosistemas con CuentaCategoria=26, confirmando que la categoria es la
+  correcta.
+- Cliente: SesionContext nuevo (`useSesion()`) para que cualquier pagina pueda leer la
+  sesion completa (antes solo se la pasaba a Nav). Nav.js oculta "Ventas Sist2" y "Bancos
+  Cobranzas" para usuarios que no son de Ecobahia. Las 3 paginas con el modal de edicion de
+  overrides (ventas-por-sucursal, ventas-por-provincia, compras-por-sucursal) ya no
+  hardcodean empresa="ecobahia" al abrir el modal - usan `sesion?.emprendimiento`, asi los
+  overrides de Ecosistemas quedan etiquetados como tal en Postgres y no se mezclan con los
+  de Ecobahia.
+- Verificado extremo a extremo con servidor HTTP de prueba (cookie JWT firmada a mano) y
+  contra datos reales de PRD02 sin HTTP: /auth/me devuelve emprendimiento correcto para
+  ambas companias; Ventas/Compras por sucursal devuelven datos reales de PRD02 para un
+  usuario de Ecosistemas; sist2/cobranzas y bancos-cobranzas/.../procesar devuelven 403
+  para Ecosistemas y siguen funcionando igual que siempre para Ecobahia; el PUT/DELETE de
+  overrides guarda y borra correctamente bajo empresa='ecosistemas' sin filtrarse hacia
+  'ecobahia'. Build de Next.js OK.
+- TODAVIA NO SE HIZO COMMIT/PUSH - queda pendiente que el usuario lo pida explicitamente.

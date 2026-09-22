@@ -2,6 +2,7 @@ import { useState } from "react";
 import { exportToExcelMultiHoja } from "@/functions/exportToExcel";
 import DocumentosClasificacionModal from "@/components/DocumentosClasificacionModal";
 import { apiFetch } from "@/functions/apiFetch";
+import { useSesion } from "@/context/SesionContext";
 
 function formatMonto(n) {
   return (n ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -39,6 +40,7 @@ const PROVINCIAS_ARGENTINA = [
 ];
 
 export default function VentasPorProvincia() {
+  const sesion = useSesion();
   const [fechaDesde, setFechaDesde] = useState("");
   const [fechaHasta, setFechaHasta] = useState("");
   const [soloConP, setSoloConP] = useState(true);
@@ -168,7 +170,7 @@ export default function VentasPorProvincia() {
 
       {provinciaSeleccionada && data && (
         <DocumentosClasificacionModal
-          empresa="ecobahia"
+          empresa={sesion?.emprendimiento || "ecobahia"}
           tipo="provincia"
           campo="Provincia"
           campoLabel="Provincia"

@@ -1,4 +1,6 @@
-const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, sql } = require('../../config/gpPool');
+
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas };
 
 // Reporte - Asiento contable de compras (resumen)
 // Mismo esquema que getAsientoVentas.js: GL20000 (SOURCDOC = PMTRX/PMVVR, grupo "compras"
@@ -18,12 +20,12 @@ const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
 // (falta siempre la contrapartida). Confirmado contra PRD08.
 const MAX_ROWS = 100000;
 
-const getAsientoCompras = async ({ fechaDesde, fechaHasta /* , sucursal */ }) => {
+const getAsientoCompras = async ({ fechaDesde, fechaHasta, empresa = 'ecobahia' /* , sucursal */ }) => {
   if (!fechaDesde || !fechaHasta) {
     throw new Error('fechaDesde y fechaHasta son requeridos');
   }
 
-  const pool = await getGpPoolEcobahia();
+  const pool = await POOLS[empresa]();
   // const sucursalFiltro = sucursal ? sucursal.trim().toUpperCase() : null;
 
   const bindFilters = (request) => {

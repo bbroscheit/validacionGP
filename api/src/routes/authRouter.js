@@ -1,7 +1,7 @@
 const authRouter = require('express').Router();
 const jwt = require('jsonwebtoken');
 const { autenticarUsuarioAD } = require('../services/adAuth.js');
-const { tieneAccesoALaApp } = require('../services/autorizacion.js');
+const { tieneAccesoALaApp, emprendimientoDeSesion } = require('../services/autorizacion.js');
 
 const { JWT_SECRET, COOKIE_SECURE } = process.env;
 const DURACION_SESION_MS = 12 * 60 * 60 * 1000; // 12hs
@@ -23,7 +23,7 @@ authRouter.post('/login', async (req, res) => {
     }
     const token = jwt.sign(datosUsuario, JWT_SECRET, { expiresIn: DURACION_SESION_MS / 1000 });
     res.cookie('token', token, opcionesCookie);
-    res.status(200).json(datosUsuario);
+    res.status(200).json({ ...datosUsuario, emprendimiento: emprendimientoDeSesion(datosUsuario) });
   } catch (e) {
     console.log('error en /auth/login', e.message);
     res.status(401).json({ state: 'error', message: e.message });
@@ -42,8 +42,9 @@ authRouter.get('/me', (req, res) => {
     return;
   }
   try {
-    const { usuario, nombre, department, company, organizacion } = jwt.verify(token, JWT_SECRET);
-    res.status(200).json({ usuario, nombre, department, company, organizacion });
+    const datosUsuario = jwt.verify(token, JWT_SECRET);
+    const { usuario, nombre, department, company, organizacion } = datosUsuario;
+    res.status(200).json({ usuario, nombre, department, company, organizacion, emprendimiento: emprendimientoDeSesion(datosUsuario) });
   } catch (e) {
     res.status(401).json({ state: 'error' });
   }

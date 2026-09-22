@@ -3,6 +3,7 @@ import { useRouter } from "next/router";
 import "@/styles/globals.css";
 import Nav from "@/components/Nav";
 import { apiFetch } from "@/functions/apiFetch";
+import { SesionProvider } from "@/context/SesionContext";
 
 // Guard de sesión: chequea /auth/me (cookie httpOnly con JWT, la deja /auth/login tras
 // validar contra Active Directory) antes de mostrar cualquier página, y redirige a
@@ -32,11 +33,11 @@ export default function App({ Component, pageProps }) {
   if (!sesion && !enLogin) return null;
 
   return (
-    <>
+    <SesionProvider sesion={sesion || null}>
       {!enLogin && <Nav usuario={sesion} onLogout={() => setSesion(false)} />}
       <main className={enLogin ? "" : "max-w-5xl mx-auto px-4 py-6"}>
         <Component {...pageProps} />
       </main>
-    </>
+    </SesionProvider>
   );
 }

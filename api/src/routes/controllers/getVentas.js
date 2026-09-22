@@ -1,4 +1,4 @@
-const { getGpPoolEcobahia, getGpPoolSist2, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolSist2, sql } = require('../../config/gpPool');
 const {
   resolverSucursalSist2,
   CLIENTE_SUCURSAL_JOIN_SIST2,
@@ -6,7 +6,7 @@ const {
   esNotaCreditoSist2,
 } = require('../../services/sist2Ventas');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, sist2: getGpPoolSist2 };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, sist2: getGpPoolSist2 };
 
 // Endpoint 1 - Ventas
 // SOP30200 = cabecera de historial de ventas (facturas/notas posteadas), campo de sucursal
@@ -124,7 +124,9 @@ const getVentas = async ({ sucursal, fechaDesde, fechaHasta, soloConP = true, em
   // la consulta se queda colgada indefinidamente (confirmado, timeout >30s en una tabla
   // de 1000 filas). Por eso para sist2 se usa el camino "colapsado" de AWLI_RM00101
   // (RI/MO se ven todos como RI) en vez de arriesgarse a colgar el endpoint entero.
-  const tipoContribuyenteJoin = empresa === 'ecobahia'
+  // Ecosistemas Patagónicos (PRD02) SÍ tiene II_DATOS_CLIE con las mismas columnas
+  // (confirmado, responde sin colgarse) - usa el mismo camino que Ecobahia.
+  const tipoContribuyenteJoin = empresa !== 'sist2'
     ? `LEFT JOIN II_DATOS_CLIE AS RT ON LTRIM(RTRIM(RT.CodigoCliente)) = LTRIM(RTRIM(H.CUSTNMBR))
        LEFT JOIN DYNAMICS..AWLI40330 AS CT ON LTRIM(RTRIM(CT.RESP_TYPE)) = LTRIM(RTRIM(RT.codigo))`
     : `LEFT JOIN AWLI_RM00101 AS RT ON RT.CUSTNMBR = H.CUSTNMBR

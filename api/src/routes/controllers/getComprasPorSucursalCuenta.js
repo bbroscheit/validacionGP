@@ -1,6 +1,8 @@
-const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, sql } = require('../../config/gpPool');
 const { coincideSucursal } = require('../../services/autorizacion');
 const { getOverridesMap } = require('../../services/clasificacionOverrides');
+
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas };
 
 // Reporte - Compras por sucursal y cuenta contable
 // Mismo esquema que getVentasPorSucursalCuenta.js pero para compras: GL20000 filtrado por
@@ -23,12 +25,12 @@ const { getOverridesMap } = require('../../services/clasificacionOverrides');
 const MONEDA_VACIA = 'En Blanco';
 const MAX_ROWS = 100000;
 
-const getComprasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, sucursalRestringida = null }) => {
+const getComprasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, empresa = 'ecobahia', sucursalRestringida = null }) => {
   if (!fechaDesde || !fechaHasta) {
     throw new Error('fechaDesde y fechaHasta son requeridos');
   }
 
-  const pool = await getGpPoolEcobahia();
+  const pool = await POOLS[empresa]();
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
@@ -101,7 +103,7 @@ const getComprasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, sucursalRes
         ${noAnuladaWhere}
       ORDER BY Sucursal ASC, Cuenta ASC
     `),
-    getOverridesMap({ empresa: 'ecobahia', tipo: 'zona' }),
+    getOverridesMap({ empresa, tipo: 'zona' }),
   ]);
 
   // Mismos overrides manuales que usa "Compras por sucursal" (tipo "zona") - así un

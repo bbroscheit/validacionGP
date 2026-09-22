@@ -16,14 +16,14 @@ const {
 // acá (Buffer.from(texto, 'latin1') - los caracteres que usamos, incluyendo tildes y ñ,
 // caen en el rango 0x00-0xFF donde latin1/windows-1252 coinciden con el código Unicode) y
 // el cliente arma el .txt a partir de esos bytes, no del string JS directamente.
-const getLibroIvaDigitalExport = async ({ fechaDesde, fechaHasta }) => {
+const getLibroIvaDigitalExport = async ({ fechaDesde, fechaHasta, empresa = 'ecobahia' }) => {
   if (!fechaDesde || !fechaHasta) {
     throw new Error('fechaDesde y fechaHasta son requeridos');
   }
 
   const [ventas, compras] = await Promise.all([
-    fetchVentas(fechaDesde, fechaHasta),
-    fetchCompras(fechaDesde, fechaHasta),
+    fetchVentas(fechaDesde, fechaHasta, empresa),
+    fetchCompras(fechaDesde, fechaHasta, empresa),
   ]);
 
   const archivos = [

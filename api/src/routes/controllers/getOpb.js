@@ -1,4 +1,6 @@
-const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, sql } = require('../../config/gpPool');
+
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas };
 
 // Endpoint 4 - OPB (órdenes de pago varias sin factura)
 // Mismo GL20000/GL00100/GL00105 que Gastos (ver getGastos.js para el porqué del join
@@ -13,12 +15,12 @@ const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
 // Por eso acá NO se hardcodea ningún filtro por defecto: sourcdoc/referencia quedan
 // como filtros opcionales para ir probando una vez que se sepa el criterio real
 // (¿un SOURCDOC puntual? ¿un prefijo de comprobante? ¿una cuenta contable específica?).
-const getOpb = async ({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, referencia, sourcdoc }) => {
+const getOpb = async ({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, referencia, sourcdoc, empresa = 'ecobahia' }) => {
   if (!cuentaDesde || !cuentaHasta) {
     throw new Error('cuentaDesde y cuentaHasta son requeridos (rango de cuentas de gastos)');
   }
 
-  const pool = await getGpPoolEcobahia();
+  const pool = await POOLS[empresa]();
   const request = pool.request();
   request.input('cuentaDesde', sql.VarChar(75), cuentaDesde);
   request.input('cuentaHasta', sql.VarChar(75), cuentaHasta);

@@ -1,7 +1,7 @@
 require('dotenv').config();
 
 const {
-  GP_USER, GP_PASSWORD, GP_SERVER, GP_DATABASE_ECOBAHIA,
+  GP_USER, GP_PASSWORD, GP_SERVER, GP_DATABASE_ECOBAHIA, GP_DATABASE_ECOSISTEMAS,
   GP2_USER, GP2_PASSWORD, GP2_SERVER, GP2_DATABASE_SIST2,
 } = process.env;
 
@@ -16,6 +16,14 @@ const gpConfigEcobahia = {
     enableArithAbort: true,
     trustServerCertificate: true,
   },
+};
+
+// Ecosistemas Patagónicos: segundo emprendimiento, mismo servidor y credenciales que
+// Ecobahia (confirmado contra PRD02 directo - mismo esquema de tablas, incluida
+// Contabilidad Analítica), solo cambia la base de datos.
+const gpConfigEcosistemas = {
+  ...gpConfigEcobahia,
+  database: GP_DATABASE_ECOSISTEMAS,
 };
 
 // Servidor "sist2" (172.19.31.47, empresa "sist2 ecobahia"): encrypt debe ir en false -
@@ -35,4 +43,4 @@ const gpConfigSist2 = {
   },
 };
 
-module.exports = { gpConfigEcobahia, gpConfigSist2 };
+module.exports = { gpConfigEcobahia, gpConfigEcosistemas, gpConfigSist2 };

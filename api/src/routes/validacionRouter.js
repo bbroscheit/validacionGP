@@ -23,6 +23,15 @@ const getCuentaCorrienteSist2 = require('./controllers/getCuentaCorrienteSist2.j
 const { putOverrideClasificacion, deleteOverrideClasificacion } = require('./controllers/overridesClasificacion.js');
 const { procesarCobranzasBanco } = require('./controllers/procesarCobranzasBanco.js');
 const bloquearSiRestringido = require('../middlewares/bloquearSiRestringido.js');
+const soloEcobahia = require('../middlewares/soloEcobahia.js');
+
+// Emprendimiento (base de GP) efectivo para esta request: si el usuario logueado es de
+// Ecosistemas Patagónicos, SIEMPRE se fuerza 'ecosistemas' del lado del servidor sin
+// importar qué mande el cliente - así ninguna request puede terminar pegándole a la base
+// de otra compañía. Para usuarios de Ecobahia se preserva el comportamiento de siempre:
+// el cliente puede elegir 'ecobahia'/'sist2' donde ya existía esa opción (query
+// ?empresa=...), o se usa 'ecobahia' por default donde nunca existió esa opción.
+const resolverEmpresa = (req) => (req.emprendimiento === 'ecosistemas' ? 'ecosistemas' : (req.query.empresa || 'ecobahia'));
 
 // Endpoint 1 - Ventas: SOP30200/SOP30300 filtrado por sucursal y fechas
 // Bloqueado para usuarios restringidos por sucursal (services/autorizacion.js): esta
@@ -30,8 +39,8 @@ const bloquearSiRestringido = require('../middlewares/bloquearSiRestringido.js')
 // comentario en getVentas.js), no hay forma segura de filtrarla.
 validacionRouter.get('/ventas', bloquearSiRestringido, async (req, res) => {
   try {
-    const { sucursal, fechaDesde, fechaHasta, soloConP, empresa } = req.query;
-    const data = await getVentas({ sucursal, fechaDesde, fechaHasta, soloConP, empresa });
+    const { sucursal, fechaDesde, fechaHasta, soloConP } = req.query;
+    const data = await getVentas({ sucursal, fechaDesde, fechaHasta, soloConP, empresa: resolverEmpresa(req) });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /ventas', e.message);
@@ -45,7 +54,7 @@ validacionRouter.get('/ventas', bloquearSiRestringido, async (req, res) => {
 validacionRouter.get('/compras', bloquearSiRestringido, async (req, res) => {
   try {
     const { fechaDesde, fechaHasta } = req.query;
-    const data = await getCompras({ fechaDesde, fechaHasta });
+    const data = await getCompras({ fechaDesde, fechaHasta, empresa: resolverEmpresa(req) });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /compras', e.message);
@@ -56,8 +65,8 @@ validacionRouter.get('/compras', bloquearSiRestringido, async (req, res) => {
 // Endpoint 3 - Gastos (GL): GL20000/GL00100 filtrado por rango de cuentas de gastos
 validacionRouter.get('/gastos', async (req, res) => {
   try {
-    const { cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, empresa } = req.query;
-    const data = await getGastos({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, empresa, sucursalRestringida: req.sucursalRestringida });
+    const { cuentaDesde, cuentaHasta, fechaDesde, fechaHasta } = req.query;
+    const data = await getGastos({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, empresa: resolverEmpresa(req), sucursalRestringida: req.sucursalRestringida });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /gastos', e.message);
@@ -70,7 +79,7 @@ validacionRouter.get('/gastos', async (req, res) => {
 validacionRouter.get('/opb', bloquearSiRestringido, async (req, res) => {
   try {
     const { cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, referencia, sourcdoc } = req.query;
-    const data = await getOpb({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, referencia, sourcdoc });
+    const data = await getOpb({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, referencia, sourcdoc, empresa: resolverEmpresa(req) });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /opb', e.message);
@@ -81,8 +90,8 @@ validacionRouter.get('/opb', bloquearSiRestringido, async (req, res) => {
 // Reporte 1 - Ventas por sucursal: SOP30200 agrupado por sucursal, monto facturado neto
 validacionRouter.get('/reportes/ventas-por-sucursal', async (req, res) => {
   try {
-    const { fechaDesde, fechaHasta, soloConP, empresa } = req.query;
-    const data = await getVentasPorSucursal({ fechaDesde, fechaHasta, soloConP, empresa, sucursalRestringida: req.sucursalRestringida });
+    const { fechaDesde, fechaHasta, soloConP } = req.query;
+    const data = await getVentasPorSucursal({ fechaDesde, fechaHasta, soloConP, empresa: resolverEmpresa(req), sucursalRestringida: req.sucursalRestringida });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/ventas-por-sucursal', e.message);
@@ -90,15 +99,15 @@ validacionRouter.get('/reportes/ventas-por-sucursal', async (req, res) => {
   }
 });
 
-// Reporte - Ventas por provincia (solo Ecobahia): SOP30200 agrupado por STATE, monto
-// facturado neto (misma lógica que ventas-por-sucursal)
+// Reporte - Ventas por provincia: SOP30200 agrupado por STATE, monto facturado neto
+// (misma lógica que ventas-por-sucursal). No existe para sist2.
 // Bloqueado para usuarios restringidos: la Provincia no es lo mismo que la Sucursal del
 // usuario (una misma provincia puede tener ventas de varias sucursales), no hay una
 // forma segura de acotarlo a "su" sucursal.
 validacionRouter.get('/reportes/ventas-por-provincia', bloquearSiRestringido, async (req, res) => {
   try {
     const { fechaDesde, fechaHasta, soloConP } = req.query;
-    const data = await getVentasPorProvincia({ fechaDesde, fechaHasta, soloConP });
+    const data = await getVentasPorProvincia({ fechaDesde, fechaHasta, soloConP, empresa: resolverEmpresa(req) });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/ventas-por-provincia', e.message);
@@ -110,8 +119,8 @@ validacionRouter.get('/reportes/ventas-por-provincia', bloquearSiRestringido, as
 // sucursal y cuenta, excluyendo la cuenta de deudores por ventas
 validacionRouter.get('/reportes/ventas-por-sucursal-cuenta', async (req, res) => {
   try {
-    const { fechaDesde, fechaHasta, soloConP, empresa } = req.query;
-    const data = await getVentasPorSucursalCuenta({ fechaDesde, fechaHasta, soloConP, empresa, sucursalRestringida: req.sucursalRestringida });
+    const { fechaDesde, fechaHasta, soloConP } = req.query;
+    const data = await getVentasPorSucursalCuenta({ fechaDesde, fechaHasta, soloConP, empresa: resolverEmpresa(req), sucursalRestringida: req.sucursalRestringida });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/ventas-por-sucursal-cuenta', e.message);
@@ -122,8 +131,8 @@ validacionRouter.get('/reportes/ventas-por-sucursal-cuenta', async (req, res) =>
 // Reporte - Asiento contable de ventas (resumen Debe/Haber), opcionalmente por sucursal
 validacionRouter.get('/reportes/asiento-ventas', async (req, res) => {
   try {
-    const { fechaDesde, fechaHasta, sucursal, soloConP, empresa } = req.query;
-    const data = await getAsientoVentas({ fechaDesde, fechaHasta, sucursal, soloConP, empresa, sucursalRestringida: req.sucursalRestringida });
+    const { fechaDesde, fechaHasta, sucursal, soloConP } = req.query;
+    const data = await getAsientoVentas({ fechaDesde, fechaHasta, sucursal, soloConP, empresa: resolverEmpresa(req), sucursalRestringida: req.sucursalRestringida });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/asiento-ventas', e.message);
@@ -134,8 +143,7 @@ validacionRouter.get('/reportes/asiento-ventas', async (req, res) => {
 // Lista de sucursales para poblar el selector de los reportes de ventas
 validacionRouter.get('/reportes/sucursales-ventas', async (req, res) => {
   try {
-    const { empresa } = req.query;
-    const data = await getSucursalesVentas({ empresa });
+    const data = await getSucursalesVentas({ empresa: resolverEmpresa(req) });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/sucursales-ventas', e.message);
@@ -148,7 +156,7 @@ validacionRouter.get('/reportes/sucursales-ventas', async (req, res) => {
 validacionRouter.get('/reportes/ventas-categoria-contribuyente', bloquearSiRestringido, async (req, res) => {
   try {
     const { fechaDesde, fechaHasta, soloConP } = req.query;
-    const data = await getVentasPorCategoriaContribuyente({ fechaDesde, fechaHasta, soloConP });
+    const data = await getVentasPorCategoriaContribuyente({ fechaDesde, fechaHasta, soloConP, empresa: resolverEmpresa(req) });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/ventas-categoria-contribuyente', e.message);
@@ -161,7 +169,7 @@ validacionRouter.get('/reportes/ventas-categoria-contribuyente', bloquearSiRestr
 validacionRouter.get('/reportes/compras-por-sucursal', async (req, res) => {
   try {
     const { fechaDesde, fechaHasta } = req.query;
-    const data = await getComprasPorSucursal({ fechaDesde, fechaHasta, sucursalRestringida: req.sucursalRestringida });
+    const data = await getComprasPorSucursal({ fechaDesde, fechaHasta, empresa: resolverEmpresa(req), sucursalRestringida: req.sucursalRestringida });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/compras-por-sucursal', e.message);
@@ -174,7 +182,7 @@ validacionRouter.get('/reportes/compras-por-sucursal', async (req, res) => {
 validacionRouter.get('/reportes/compras-por-sucursal-cuenta', async (req, res) => {
   try {
     const { fechaDesde, fechaHasta } = req.query;
-    const data = await getComprasPorSucursalCuenta({ fechaDesde, fechaHasta, sucursalRestringida: req.sucursalRestringida });
+    const data = await getComprasPorSucursalCuenta({ fechaDesde, fechaHasta, empresa: resolverEmpresa(req), sucursalRestringida: req.sucursalRestringida });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/compras-por-sucursal-cuenta', e.message);
@@ -188,7 +196,7 @@ validacionRouter.get('/reportes/compras-por-sucursal-cuenta', async (req, res) =
 validacionRouter.get('/reportes/asiento-compras', bloquearSiRestringido, async (req, res) => {
   try {
     const { fechaDesde, fechaHasta /* , sucursal */ } = req.query;
-    const data = await getAsientoCompras({ fechaDesde, fechaHasta /* , sucursal */ });
+    const data = await getAsientoCompras({ fechaDesde, fechaHasta, empresa: resolverEmpresa(req) /* , sucursal */ });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/asiento-compras', e.message);
@@ -199,7 +207,7 @@ validacionRouter.get('/reportes/asiento-compras', bloquearSiRestringido, async (
 // Lista de sucursales (zona) para poblar el selector de los reportes de compras
 validacionRouter.get('/reportes/sucursales-compras', async (req, res) => {
   try {
-    const data = await getSucursalesCompras();
+    const data = await getSucursalesCompras({ empresa: resolverEmpresa(req) });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/sucursales-compras', e.message);
@@ -212,7 +220,7 @@ validacionRouter.get('/reportes/sucursales-compras', async (req, res) => {
 validacionRouter.get('/reportes/compras-categoria-contribuyente', bloquearSiRestringido, async (req, res) => {
   try {
     const { fechaDesde, fechaHasta } = req.query;
-    const data = await getComprasPorCategoriaContribuyente({ fechaDesde, fechaHasta });
+    const data = await getComprasPorCategoriaContribuyente({ fechaDesde, fechaHasta, empresa: resolverEmpresa(req) });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/compras-categoria-contribuyente', e.message);
@@ -226,7 +234,7 @@ validacionRouter.get('/reportes/compras-categoria-contribuyente', bloquearSiRest
 validacionRouter.get('/reportes/libro-iva-digital/resumen', bloquearSiRestringido, async (req, res) => {
   try {
     const { fechaDesde, fechaHasta } = req.query;
-    const data = await getLibroIvaDigitalResumen({ fechaDesde, fechaHasta });
+    const data = await getLibroIvaDigitalResumen({ fechaDesde, fechaHasta, empresa: resolverEmpresa(req) });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/libro-iva-digital/resumen', e.message);
@@ -239,7 +247,7 @@ validacionRouter.get('/reportes/libro-iva-digital/resumen', bloquearSiRestringid
 validacionRouter.get('/reportes/libro-iva-digital/export', bloquearSiRestringido, async (req, res) => {
   try {
     const { fechaDesde, fechaHasta } = req.query;
-    const data = await getLibroIvaDigitalExport({ fechaDesde, fechaHasta });
+    const data = await getLibroIvaDigitalExport({ fechaDesde, fechaHasta, empresa: resolverEmpresa(req) });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/libro-iva-digital/export', e.message);
@@ -248,8 +256,9 @@ validacionRouter.get('/reportes/libro-iva-digital/export', bloquearSiRestringido
 });
 
 // Reporte - Cobranzas por sucursal (solo sist2): recibos (GL20000, CRJ/RMJ) agrupados
-// por sucursal, resuelta vía la factura aplicada o, si no hay, la ficha del cliente
-validacionRouter.get('/reportes/sist2/cobranzas', async (req, res) => {
+// por sucursal, resuelta vía la factura aplicada o, si no hay, la ficha del cliente.
+// Bloqueado para Ecosistemas Patagónicos: no tiene sist2.
+validacionRouter.get('/reportes/sist2/cobranzas', soloEcobahia, async (req, res) => {
   try {
     const { fechaDesde, fechaHasta } = req.query;
     const data = await getCobranzasSist2({ fechaDesde, fechaHasta, sucursalRestringida: req.sucursalRestringida });
@@ -261,7 +270,8 @@ validacionRouter.get('/reportes/sist2/cobranzas', async (req, res) => {
 });
 
 // Búsqueda de clientes (sist2) para el selector de Cuenta Corriente
-validacionRouter.get('/reportes/sist2/clientes', async (req, res) => {
+// Bloqueado para Ecosistemas Patagónicos: no tiene sist2.
+validacionRouter.get('/reportes/sist2/clientes', soloEcobahia, async (req, res) => {
   try {
     const { q } = req.query;
     const data = await getClientesSist2({ q });
@@ -273,8 +283,9 @@ validacionRouter.get('/reportes/sist2/clientes', async (req, res) => {
 });
 
 // Reporte - Cuenta corriente de cliente (solo sist2): historial completo (RM20101) con
-// saldo inicial arrastrado + movimientos del período con saldo corrido
-validacionRouter.get('/reportes/sist2/cuenta-corriente', async (req, res) => {
+// saldo inicial arrastrado + movimientos del período con saldo corrido.
+// Bloqueado para Ecosistemas Patagónicos: no tiene sist2.
+validacionRouter.get('/reportes/sist2/cuenta-corriente', soloEcobahia, async (req, res) => {
   try {
     const { cliente, fechaDesde, fechaHasta, sucursal, pendientes } = req.query;
     const data = await getCuentaCorrienteSist2({ cliente, fechaDesde, fechaHasta, sucursal, pendientes, sucursalRestringida: req.sucursalRestringida });
@@ -286,8 +297,10 @@ validacionRouter.get('/reportes/sist2/cuenta-corriente', async (req, res) => {
 });
 
 // Overrides de clasificación (Postgres, app propia): corrección manual por comprobante
-// de Sucursal/Provincia cuando el dato de GP viene en blanco o mal cargado. Se aplican
-// dentro de getVentasPorSucursal.js / getVentasPorProvincia.js antes de agrupar.
+// de Sucursal/Provincia/Zona cuando el dato de GP viene en blanco o mal cargado. Se
+// aplican dentro de los controllers de "por sucursal"/"por provincia" antes de agrupar.
+// `empresa` viene del cliente (ver client/context/SesionContext.js) - no del servidor,
+// para no tener que resolver acá los distintos "tipo" que cada pantalla usa.
 validacionRouter.put('/overrides/clasificacion', async (req, res) => {
   try {
     const { empresa, tipo, comprobante, valor, valorOriginal, usuario } = req.body;
@@ -313,7 +326,9 @@ validacionRouter.delete('/overrides/clasificacion', async (req, res) => {
 // Bancos Cobranzas > Resumen: sube un excel de movimientos de un banco (formato propio
 // por banco) y devuelve el mismo excel con una columna "Número de Cliente" agregada,
 // buscando cada movimiento en la base de clientes de GP (RM00101) por CUIT o nombre.
-validacionRouter.post('/bancos-cobranzas/:banco/procesar', async (req, res) => {
+// Bloqueado para Ecosistemas Patagónicos: por ahora solo busca contra el RM00101 de
+// Ecobahia (ver services/clientesGp.js), no tiene sentido mostrarlo a otra compañía.
+validacionRouter.post('/bancos-cobranzas/:banco/procesar', soloEcobahia, async (req, res) => {
   try {
     const { banco } = req.params;
     const { filas } = req.body;

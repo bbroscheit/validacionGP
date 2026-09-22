@@ -1,4 +1,6 @@
-const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, sql } = require('../../config/gpPool');
+
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas };
 
 // Reporte - Ventas por categoría de cuenta y tipo de contribuyente
 // Categoría = GL00100.USERDEF2 (uno de los 4 campos "definidos por el usuario" de la
@@ -24,18 +26,27 @@ const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
 // dejaba de cerrar contra el Neto. Confirmado contra PRD08 (julio/2026): excluyendo solo
 // deudores + ACCATNUM=30 el total da 473.560.303,27, exacto contra el Neto de
 // "Ventas por sucursal".
+//
+// OJO: ACCATNUM y los números de cuenta son configuración propia de cada compañía GP,
+// no códigos universales (mismo hallazgo que en getComprasPorSucursal.js). Mapeo de
+// Ecosistemas (PRD02) confirmado contra su plan de cuentas real: categoría 13 = "I.V.A
+// Saldo a Pagar/Débito Fiscal/Retenciones" (equivalente a "Cargas Fiscales a pagar" de
+// PRD08), cuenta 112110-02-000 = "DEUDORES POR VENTAS".
 const MONEDA_VACIA = 'En Blanco';
-const CUENTA_DEUDORES = '113110-01-000';
-const ACCATNUM_IMPUESTOS = 30;
+const CONFIG_EMPRESA = {
+  ecobahia: { cuentaDeudores: '113110-01-000', accatnumImpuestos: 30 },
+  ecosistemas: { cuentaDeudores: '112110-02-000', accatnumImpuestos: 13 },
+};
 const MAX_ROWS = 100000;
 
-const getVentasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta, soloConP = true }) => {
+const getVentasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta, soloConP = true, empresa = 'ecobahia' }) => {
   if (!fechaDesde || !fechaHasta) {
     throw new Error('fechaDesde y fechaHasta son requeridos');
   }
 
-  const pool = await getGpPoolEcobahia();
+  const pool = await POOLS[empresa]();
   const soloConPBool = soloConP === false || soloConP === 'false' ? false : true;
+  const { cuentaDeudores: CUENTA_DEUDORES, accatnumImpuestos: ACCATNUM_IMPUESTOS } = CONFIG_EMPRESA[empresa];
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));

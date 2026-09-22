@@ -1,4 +1,6 @@
-const { getGpPoolEcobahia, sql } = require('../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, sql } = require('../config/gpPool');
+
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas };
 
 // Datos crudos para el Libro IVA Digital (ARCA, R.G. 4597) - ventas y compras.
 //
@@ -93,8 +95,8 @@ function parseComprobante(str) {
   return { tipoDoc, letra, pdv };
 }
 
-async function fetchVentas(fechaDesde, fechaHasta) {
-  const pool = await getGpPoolEcobahia();
+async function fetchVentas(fechaDesde, fechaHasta, empresa = 'ecobahia') {
+  const pool = await POOLS[empresa]();
   const request = pool.request();
   request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
   request.input('fechaHasta', sql.DateTime, new Date(fechaHasta));
@@ -166,8 +168,8 @@ async function fetchVentas(fechaDesde, fechaHasta) {
   });
 }
 
-async function fetchCompras(fechaDesde, fechaHasta) {
-  const pool = await getGpPoolEcobahia();
+async function fetchCompras(fechaDesde, fechaHasta, empresa = 'ecobahia') {
+  const pool = await POOLS[empresa]();
   const request = pool.request();
   request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
   request.input('fechaHasta', sql.DateTime, new Date(fechaHasta));

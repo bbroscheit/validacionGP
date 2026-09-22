@@ -1,4 +1,6 @@
-const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, sql } = require('../../config/gpPool');
+
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas };
 
 // Endpoint 2 - Compras
 // PM10000 = transacciones aún en work/sin postear.
@@ -79,8 +81,8 @@ function aplicarSignoYColumnas(recordset) {
   });
 }
 
-const getCompras = async ({ fechaDesde, fechaHasta }) => {
-  const pool = await getGpPoolEcobahia();
+const getCompras = async ({ fechaDesde, fechaHasta, empresa = 'ecobahia' }) => {
+  const pool = await POOLS[empresa]();
   const docTypeWhere = `DOCTYPE <> ${DOCTYPE_EXCLUIDO}`;
 
   const bindFilters = (request) => {

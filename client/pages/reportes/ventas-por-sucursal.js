@@ -2,6 +2,7 @@ import { useState } from "react";
 import { exportToExcelMultiHoja } from "@/functions/exportToExcel";
 import DocumentosClasificacionModal from "@/components/DocumentosClasificacionModal";
 import { apiFetch } from "@/functions/apiFetch";
+import { useSesion } from "@/context/SesionContext";
 
 function formatMonto(n) {
   return (n ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -12,6 +13,7 @@ function formatEntero(n) {
 }
 
 export default function VentasPorSucursal() {
+  const sesion = useSesion();
   const [fechaDesde, setFechaDesde] = useState("");
   const [fechaHasta, setFechaHasta] = useState("");
   const [soloConP, setSoloConP] = useState(true);
@@ -141,7 +143,7 @@ export default function VentasPorSucursal() {
 
       {sucursalSeleccionada && data && (
         <DocumentosClasificacionModal
-          empresa="ecobahia"
+          empresa={sesion?.emprendimiento || "ecobahia"}
           tipo="sucursal"
           campo="Sucursal"
           campoLabel="Sucursal"

@@ -1,7 +1,7 @@
-const { getGpPoolEcobahia, getGpPoolSist2, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolSist2, sql } = require('../../config/gpPool');
 const { coincideSucursal } = require('../../services/autorizacion');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, sist2: getGpPoolSist2 };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, sist2: getGpPoolSist2 };
 
 // Endpoint 3 - Gastos (GL)
 // GL20000 = detalle de movimientos posteados al mayor. GL00100 = maestro de cuentas
@@ -119,9 +119,11 @@ const getGastos = async ({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, emp
   // "Dimensión de trans." - el campo que distingue ZONA de CENTRO DE COSTO - y
   // "Descripción del código de dimensión de transacción" tampoco existe con ese
   // nombre). Es una Contabilidad Analítica configurada distinto en esa instalación de
-  // GP, no se investigó todavía cómo mapea. Por eso el join de dimensión solo se arma
-  // para 'ecobahia' - para el resto, Zona/Centro quedan en blanco en vez de romper el
-  // endpoint.
+  // GP, no se investigó todavía cómo mapea. Por eso el join de dimensión se arma para
+  // cualquier empresa MENOS sist2 (no solo 'ecobahia': confirmado que Ecosistemas
+  // Patagónicos -PRD02- tiene el mismo esquema de columnas que Ecobahia en
+  // AATransactions, solo que está vacía - la query corre igual y da todo en blanco, sin
+  // necesitar la rama especial que sí hace falta para sist2).
   // OJO (2026-09-16): a diferencia de Compras por sucursal/por sucursal y cuenta, acá NO
   // se prorratea el importe entre las zonas cuando un asiento distribuye una línea por
   // porcentaje entre varias (ver el comentario largo en getComprasPorSucursal.js) - este
@@ -133,13 +135,13 @@ const getGastos = async ({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, emp
   // más de una zona (distribución por %), acá se sigue viendo solo una (la que gane el
   // MAX()) con el importe completo de la línea - pendiente de resolver si hace falta acá
   // también, es un cambio más grande porque este reporte no agrupa por comprobante.
-  const aaJoin = empresa === 'ecobahia'
+  const aaJoin = empresa !== 'sist2'
     ? `LEFT JOIN AADetalle AS AA ON AA.JRNENTRY = G.JRNENTRY AND AA.ACTINDX = G.ACTINDX AND AA.SEQNUMBR = G.SEQNUMBR`
     : '';
-  const aaSelect = empresa === 'ecobahia'
+  const aaSelect = empresa !== 'sist2'
     ? 'AA.ZONA, AA.ZONA_DESC, AA.ID_CENTRO, AA.CENTRO_DESC'
     : 'CAST(NULL AS VARCHAR(50)) AS ZONA, CAST(NULL AS VARCHAR(50)) AS ZONA_DESC, CAST(NULL AS VARCHAR(50)) AS ID_CENTRO, CAST(NULL AS VARCHAR(50)) AS CENTRO_DESC';
-  const aaCte = empresa === 'ecobahia'
+  const aaCte = empresa !== 'sist2'
     ? `WITH AADetalle AS (
         SELECT
           A.[Entrada de diario] AS JRNENTRY,
@@ -213,10 +215,20 @@ const getGastos = async ({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, emp
   // Cada OPV/EGRE tiene una línea de contrapartida en una cuenta de efectivo (ACCATNUM
   // 20/21 - "FONDO FIJO"/"CAJA") que no es un gasto en sí, es solo el movimiento de
   // plata. Se queda solo con las líneas de gasto real: ACCATNUM 16 y 17 (confirmado
-  // contra PRD08, las dos empresas: 16/17 son cuentas de gastos, 20/21 son efectivo -
-  // también aparecen otras categorías sueltas mezcladas ahí, como 7/22/24/29/30 en
-  // Ecobahia, que tampoco son gasto).
-  const CUENTA_CATEGORIA_GASTO = [16, 17];
+  // contra PRD08, las dos empresas que comparten esa base - ecobahia y sist2: 16/17 son
+  // cuentas de gastos, 20/21 son efectivo - también aparecen otras categorías sueltas
+  // mezcladas ahí, como 7/22/24/29/30 en Ecobahia, que tampoco son gasto).
+  // OJO: ACCATNUM es configuración propia de cada compañía GP, no un código universal -
+  // ecobahia/sist2 comparten base (PRD08) así que valen los mismos números, pero
+  // Ecosistemas (PRD02) tiene su propio plan de cuentas: ahí "Egresos Operativos" es la
+  // categoría 26 y no existe una categoría separada de "Egresos No Operativos" (a
+  // diferencia de PRD08 que sí separa 16/17) - confirmado contra GL00102 de PRD02.
+  const CUENTA_CATEGORIA_GASTO_POR_EMPRESA = {
+    ecobahia: [16, 17],
+    sist2: [16, 17],
+    ecosistemas: [26],
+  };
+  const CUENTA_CATEGORIA_GASTO = CUENTA_CATEGORIA_GASTO_POR_EMPRESA[empresa];
   const pagosOPV = grupos.pagos.filter((row) => {
     const ref = String(row.ORCTRNUM || '');
     return (ref.includes('OPV') || ref.includes('EGRE')) && CUENTA_CATEGORIA_GASTO.includes(row.CuentaCategoria);

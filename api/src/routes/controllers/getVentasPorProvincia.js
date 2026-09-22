@@ -1,19 +1,22 @@
-const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, sql } = require('../../config/gpPool');
 const { getOverridesMap } = require('../../services/clasificacionOverrides');
 
-// Reporte - Ventas por provincia (solo Ecobahia): igual que Ventas por sucursal, pero
-// agrupa SOP30200 por STATE (provincia de la ficha del cliente/comprobante) en vez de
-// PHONE3. Misma lógica de Neto/Impuestos/Total y mismo signo invertido en notas de
-// crédito - ver getVentasPorSucursal.js para el detalle de esas cuentas.
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas };
+
+// Reporte - Ventas por provincia: igual que Ventas por sucursal, pero agrupa SOP30200 por
+// STATE (provincia de la ficha del cliente/comprobante) en vez de PHONE3. Misma lógica de
+// Neto/Impuestos/Total y mismo signo invertido en notas de crédito - ver
+// getVentasPorSucursal.js para el detalle de esas cuentas. No existe para sist2
+// (bloqueado en el router), pero sí aplica a Ecosistemas Patagónicos igual que Ecobahia.
 const MONEDA_VACIA = 'En Blanco';
 const MAX_ROWS = 100000;
 
-const getVentasPorProvincia = async ({ fechaDesde, fechaHasta, soloConP = true }) => {
+const getVentasPorProvincia = async ({ fechaDesde, fechaHasta, soloConP = true, empresa = 'ecobahia' }) => {
   if (!fechaDesde || !fechaHasta) {
     throw new Error('fechaDesde y fechaHasta son requeridos');
   }
 
-  const pool = await getGpPoolEcobahia();
+  const pool = await POOLS[empresa]();
   const soloConPBool = soloConP === false || soloConP === 'false' ? false : true;
 
   const bindFilters = (request) => {
@@ -56,7 +59,7 @@ const getVentasPorProvincia = async ({ fechaDesde, fechaHasta, soloConP = true }
         AND ISNULL(H.VOIDSTTS, 0) = 0
       ORDER BY H.DOCDATE ASC
     `),
-    getOverridesMap({ empresa: 'ecobahia', tipo: 'provincia' }),
+    getOverridesMap({ empresa, tipo: 'provincia' }),
   ]);
 
   const base = detalle.recordset.map((row) => {

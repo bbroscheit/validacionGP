@@ -16,14 +16,14 @@ function resumir(documentos) {
   return { neto, impuestos, total, cantidadComprobantes: documentos.length };
 }
 
-const getLibroIvaDigitalResumen = async ({ fechaDesde, fechaHasta }) => {
+const getLibroIvaDigitalResumen = async ({ fechaDesde, fechaHasta, empresa = 'ecobahia' }) => {
   if (!fechaDesde || !fechaHasta) {
     throw new Error('fechaDesde y fechaHasta son requeridos');
   }
 
   const [ventas, compras] = await Promise.all([
-    fetchVentas(fechaDesde, fechaHasta),
-    fetchCompras(fechaDesde, fechaHasta),
+    fetchVentas(fechaDesde, fechaHasta, empresa),
+    fetchCompras(fechaDesde, fechaHasta, empresa),
   ]);
 
   return {

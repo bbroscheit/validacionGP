@@ -1,7 +1,8 @@
 const sql = require('mssql');
-const { gpConfigEcobahia, gpConfigSist2 } = require('./gpConfig');
+const { gpConfigEcobahia, gpConfigEcosistemas, gpConfigSist2 } = require('./gpConfig');
 
 let poolPromiseEcobahia;
+let poolPromiseEcosistemas;
 let poolPromiseSist2;
 
 // Pool compartido: mssql ya maneja el pooling de conexiones internamente,
@@ -19,6 +20,18 @@ function getGpPoolEcobahia() {
   return poolPromiseEcobahia;
 }
 
+// Ecosistemas Patagónicos (PRD02) - mismo servidor que Ecobahia, pool propio porque es
+// una base de datos distinta (mssql pool-ea por config, no por servidor).
+function getGpPoolEcosistemas() {
+  if (!poolPromiseEcosistemas) {
+    poolPromiseEcosistemas = new sql.ConnectionPool(gpConfigEcosistemas).connect();
+    poolPromiseEcosistemas.catch(() => {
+      poolPromiseEcosistemas = null;
+    });
+  }
+  return poolPromiseEcosistemas;
+}
+
 // Segundo servidor GP ("sist2", 172.19.31.47) - mismo patrón que Ecobahia, pool propio
 // porque son dos SQL Server físicamente distintos.
 function getGpPoolSist2() {
@@ -31,4 +44,4 @@ function getGpPoolSist2() {
   return poolPromiseSist2;
 }
 
-module.exports = { getGpPoolEcobahia, getGpPoolSist2, sql };
+module.exports = { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolSist2, sql };

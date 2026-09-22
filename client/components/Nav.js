@@ -63,6 +63,13 @@ export default function Nav({ usuario, onLogout }) {
   const [abierto, setAbierto] = useState(null);
   const navRef = useRef(null);
 
+  // "Ventas Sist2" y "Bancos Cobranzas" son específicos de Ecobahia (sist2 no existe
+  // para otros emprendimientos, y Bancos Cobranzas por ahora solo busca contra la base
+  // de clientes de Ecobahia - ver services/clientesGp.js) - se ocultan para cualquier
+  // otro emprendimiento en vez de mostrar un link que va a dar 403.
+  const esEcobahia = !usuario || usuario.emprendimiento === "ecobahia";
+  const menusVisibles = menus.filter((menu) => esEcobahia || (menu.label !== "Ventas Sist2" && menu.label !== "Bancos Cobranzas"));
+
   const cerrarSesion = async () => {
     try {
       await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/logout`, { method: "POST" });
@@ -90,7 +97,7 @@ export default function Nav({ usuario, onLogout }) {
           Validación GP
         </Link>
 
-        {menus.map((menu) => {
+        {menusVisibles.map((menu) => {
           const enMenu = menu.links.some((link) => link.href === router.pathname);
           return (
             <div key={menu.label} className="relative">
