@@ -13,6 +13,7 @@ export default function App({ Component, pageProps }) {
   // null = todavía no se sabe, false = no logueado, {usuario,nombre} = logueado
   const [sesion, setSesion] = useState(null);
   const enLogin = router.pathname === "/login";
+  const enElegirEmprendimiento = router.pathname === "/elegir-emprendimiento";
 
   useEffect(() => {
     let activo = true;
@@ -23,19 +24,24 @@ export default function App({ Component, pageProps }) {
     return () => { activo = false; };
   }, []);
 
+  // Un usuario de Gerencia logueado pero sin emprendimiento elegido todavía (sesion.emprendimiento
+  // null - ver services/autorizacion.js) queda atrapado en /elegir-emprendimiento hasta que
+  // elija; si ya eligió y vuelve ahí por su cuenta (para cambiarlo, ver Nav.js), se lo deja.
   useEffect(() => {
     if (sesion === null) return;
     if (!sesion && !enLogin) router.replace("/login");
     if (sesion && enLogin) router.replace("/");
-  }, [sesion, enLogin, router]);
+    if (sesion && !sesion.emprendimiento && !enElegirEmprendimiento) router.replace("/elegir-emprendimiento");
+  }, [sesion, enLogin, enElegirEmprendimiento, router]);
 
   if (sesion === null) return null;
   if (!sesion && !enLogin) return null;
+  if (sesion && !sesion.emprendimiento && !enElegirEmprendimiento) return null;
 
   return (
     <SesionProvider sesion={sesion || null}>
-      {!enLogin && <Nav usuario={sesion} onLogout={() => setSesion(false)} />}
-      <main className={enLogin ? "" : "max-w-5xl mx-auto px-4 py-6"}>
+      {!enLogin && !enElegirEmprendimiento && <Nav usuario={sesion} onLogout={() => setSesion(false)} />}
+      <main className={enLogin || enElegirEmprendimiento ? "" : "max-w-5xl mx-auto px-4 py-6"}>
         <Component {...pageProps} />
       </main>
     </SesionProvider>

@@ -124,29 +124,37 @@ const getGastos = async ({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, emp
   // Patagónicos -PRD02- tiene el mismo esquema de columnas que Ecobahia en
   // AATransactions, solo que está vacía - la query corre igual y da todo en blanco, sin
   // necesitar la rama especial que sí hace falta para sist2).
-  // OJO (2026-09-16): a diferencia de Compras por sucursal/por sucursal y cuenta, acá NO
-  // se prorratea el importe entre las zonas cuando un asiento distribuye una línea por
-  // porcentaje entre varias (ver el comentario largo en getComprasPorSucursal.js) - este
-  // reporte trae la línea de GL20000 tal cual (G.*, con su DEBITAMT/CRDTAMNT completo), y
-  // solo arma un fix parcial: el join ahora es por JRNENTRY+ACTINDX+SEQNUMBR (no solo
-  // JRNENTRY+ACTINDX) para al menos no mezclar dos líneas DISTINTAS que comparten cuenta
-  // dentro del mismo asiento (confirmado un puñado de casos reales así en PRD08 - sin
-  // esto, la Zona/Centro de una línea se le podía pegar a otra). Si la línea en sí tiene
-  // más de una zona (distribución por %), acá se sigue viendo solo una (la que gane el
-  // MAX()) con el importe completo de la línea - pendiente de resolver si hace falta acá
-  // también, es un cambio más grande porque este reporte no agrupa por comprobante.
+  // FIX (2026-09-23, a pedido del usuario - confirmado con datos reales que el problema
+  // era real: 25 líneas de DG en 2026 con 6 zonas cada una, algunas de más de $3M, todas
+  // apareciendo enteras en una sola zona): ahora SÍ se prorratea el importe entre zonas
+  // cuando un asiento distribuye una línea por % entre varias, mismo mecanismo que ya usa
+  // getComprasPorSucursal.js (ver el comentario largo ahí para el detalle de cómo se
+  // confirmó la clave JRNENTRY+ACTINDX+SEQNUMBR+"Id. de asignación de contabilidad
+  // analítica" - cada asignación pairea una fila ZONA + una fila CENTRO DE COSTO con el
+  // mismo Monto débito/crédito). La CTE ahora agrupa también por esa asignación (antes
+  // colapsaba todas las asignaciones de una línea en una sola con MAX()), así que el LEFT
+  // JOIN puede devolver VARIAS filas por línea de GL20000 cuando corresponde - una por
+  // zona, cada una con su parte proporcional.
+  // Como este reporte trae G.* (con su propio DEBITAMT/CRDTAMNT de la línea completa) y en
+  // SQL Server no se puede pisar una columna de G.* con un alias del mismo nombre sin
+  // ambigüedad, el monto de cada asignación se trae con nombre temporal
+  // (_AA_DEBITAMT/_AA_CRDTAMNT) y se usa para pisar DEBITAMT/CRDTAMNT en JS después de la
+  // consulta (ver más abajo) - si una línea no tiene ninguna asignación de Contabilidad
+  // Analítica, esas columnas quedan NULL y el monto original de G se deja como está,
+  // comportamiento idéntico al de antes para ese caso.
   const aaJoin = empresa !== 'sist2'
     ? `LEFT JOIN AADetalle AS AA ON AA.JRNENTRY = G.JRNENTRY AND AA.ACTINDX = G.ACTINDX AND AA.SEQNUMBR = G.SEQNUMBR`
     : '';
   const aaSelect = empresa !== 'sist2'
-    ? 'AA.ZONA, AA.ZONA_DESC, AA.ID_CENTRO, AA.CENTRO_DESC'
-    : 'CAST(NULL AS VARCHAR(50)) AS ZONA, CAST(NULL AS VARCHAR(50)) AS ZONA_DESC, CAST(NULL AS VARCHAR(50)) AS ID_CENTRO, CAST(NULL AS VARCHAR(50)) AS CENTRO_DESC';
+    ? 'AA.ZONA, AA.ZONA_DESC, AA.ID_CENTRO, AA.CENTRO_DESC, AA.AA_DEBITAMT AS _AA_DEBITAMT, AA.AA_CRDTAMNT AS _AA_CRDTAMNT'
+    : 'CAST(NULL AS VARCHAR(50)) AS ZONA, CAST(NULL AS VARCHAR(50)) AS ZONA_DESC, CAST(NULL AS VARCHAR(50)) AS ID_CENTRO, CAST(NULL AS VARCHAR(50)) AS CENTRO_DESC, CAST(NULL AS MONEY) AS _AA_DEBITAMT, CAST(NULL AS MONEY) AS _AA_CRDTAMNT';
   const aaCte = empresa !== 'sist2'
     ? `WITH AADetalle AS (
         SELECT
           A.[Entrada de diario] AS JRNENTRY,
           A.[Índice de cuenta] AS ACTINDX,
           A.[Número de secuencia] AS SEQNUMBR,
+          A.[Id. de asignación de contabilidad analítica] AS ASIGNID,
           MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'ZONA'
               THEN NULLIF(LTRIM(RTRIM(A.[Cód. de dimensión de trans.])), '') END) AS ZONA,
           MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'ZONA'
@@ -154,9 +162,11 @@ const getGastos = async ({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, emp
           MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'CENTRO DE COSTO'
               THEN NULLIF(LTRIM(RTRIM(A.[Cód. de dimensión de trans.])), '') END) AS ID_CENTRO,
           MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'CENTRO DE COSTO'
-              THEN NULLIF(LTRIM(RTRIM(A.[Descripción del código de dimensión de transacción])), '') END) AS CENTRO_DESC
+              THEN NULLIF(LTRIM(RTRIM(A.[Descripción del código de dimensión de transacción])), '') END) AS CENTRO_DESC,
+          MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'ZONA' THEN A.[Monto débito] END) AS AA_DEBITAMT,
+          MAX(CASE WHEN LTRIM(RTRIM(A.[Dimensión de trans.])) = 'ZONA' THEN A.[Monto crédito] END) AS AA_CRDTAMNT
         FROM dbo.AATransactions A
-        GROUP BY A.[Entrada de diario], A.[Índice de cuenta], A.[Número de secuencia]
+        GROUP BY A.[Entrada de diario], A.[Índice de cuenta], A.[Número de secuencia], A.[Id. de asignación de contabilidad analítica]
       )`
     : '';
 
@@ -181,6 +191,19 @@ const getGastos = async ({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, emp
       ${noAnuladaWhere}
     ORDER BY G.TRXDATE ASC
   `);
+
+  // Pisa el DEBITAMT/CRDTAMNT de la línea completa con el de la asignación de
+  // Contabilidad Analítica que le corresponde a esta fila (ver comentario de _AA_DEBITAMT/
+  // _AA_CRDTAMNT más arriba) - si una línea no tiene ninguna asignación, quedan NULL acá y
+  // se deja el monto original de G tal cual estaba.
+  result.recordset.forEach((row) => {
+    if (row._AA_DEBITAMT !== null || row._AA_CRDTAMNT !== null) {
+      row.DEBITAMT = row._AA_DEBITAMT || 0;
+      row.CRDTAMNT = row._AA_CRDTAMNT || 0;
+    }
+    delete row._AA_DEBITAMT;
+    delete row._AA_CRDTAMNT;
+  });
 
   // Cuentas de activo/pasivo (y a veces alguna de gasto) no siempre tienen Zona/Centro
   // cargado en Contabilidad Analítica - se deja explícito en vez de una celda vacía.

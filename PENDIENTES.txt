@@ -1282,3 +1282,110 @@ Feature: segundo emprendimiento "Ecosistemas Patagonicos" (PRD02) (2026-09-21)
   overrides guarda y borra correctamente bajo empresa='ecosistemas' sin filtrarse hacia
   'ecobahia'. Build de Next.js OK.
 - TODAVIA NO SE HIZO COMMIT/PUSH - queda pendiente que el usuario lo pida explicitamente.
+
+Feature: usuario "Gerencia" - selector de emprendimiento post-login (2026-09-23)
+- El usuario avisó que van a sumarse 4 emprendimientos más a futuro (fuera de alcance de
+  esta vuelta, cada uno implica su propio pool/config de GP y sumarse a los ~17
+  controllers, mismo trabajo que llevó Ecosistemas Patagonicos) y pidió que un usuario cuya
+  compañia de AD sea exactamente "Gerencia" (string confirmado por el usuario) no quede
+  atado a un solo emprendimiento - debe poder elegir, en una pantalla despues del login, a
+  cual de los disponibles quiere entrar, y de ahi en mas navegar la app exactamente como lo
+  haria un usuario nativo de esa compañia (mismos reportes, mismas restricciones de
+  sist2/Bancos Cobranzas si corresponde).
+- Diseño: en vez de que el cliente mande el emprendimiento elegido en cada request (un
+  mecanismo de confianza nuevo que no encajaba con el resto de la app, donde
+  req.emprendimiento es siempre 100% derivado del JWT verificado en el servidor), se
+  reemite la cookie de sesion con la eleccion adentro (claim "emprendimientoElegido"). Con
+  esto la sesion de Gerencia, una vez que eligio, queda ESTRUCTURALMENTE IGUAL a la de un
+  usuario nativo de esa compañia - emprendimientoDeSesion() devuelve exactamente lo mismo -
+  asi que resolverEmpresa, soloEcobahia, el etiquetado de overrides y los ~17 controllers
+  no necesitaron NINGUN cambio, siguen funcionando tal cual estaban. Confirmado por
+  busqueda exhaustiva de emprendimiento/organizacion/req.usuario en todo el arbol antes de
+  escribir codigo, para no dejar ningun lugar que leyera esos datos por afuera del camino
+  ya cubierto.
+- api/src/services/autorizacion.js: `ORGANIZACION_GERENCIA`, `esGerencia()`,
+  `EMPRENDIMIENTOS_DISPONIBLES` (registro nuevo, hoy solo ecobahia/ecosistemas - agregar
+  una entrada de una linea ahi cuando llegue un emprendimiento nuevo, aunque habilitarlo de
+  verdad sigue siendo el trabajo completo de onboarding). `esAccesoCompleto` ahora incluye
+  Gerencia (no esta atada a una sucursal). `emprendimientoDeSesion` para Gerencia devuelve
+  el claim `emprendimientoElegido` del JWT SI es un valor presente en
+  `EMPRENDIMIENTOS_DISPONIBLES` (se revalida en cada request, no solo al emitir el token -
+  asi una eleccion vieja/invalida si algun dia se saca una opcion del registro no cuela), o
+  `null` si todavia no eligio.
+- api/src/middlewares/requireAuth.js: si `req.emprendimiento` da null (Gerencia sin
+  elegir), corta con 403 antes de dejar pasar a cualquier ruta de reportes - no afecta a
+  nadie mas, confirmado que para el resto de los usuarios `emprendimientoDeSesion` nunca da
+  null.
+- api/src/routes/authRouter.js: `/login` y `/me` ahora devuelven tambien `esGerencia` y,
+  solo cuando es true, `emprendimientosDisponibles` (asi el cliente nunca necesita su
+  propia copia hardcodeada de la lista). Ruta nueva `POST /auth/elegir-emprendimiento`
+  (verifica el JWT a mano igual que `/me`, exige `esGerencia`, valida el valor posteado
+  contra el registro, re-firma la cookie con el claim nuevo, sesion de 12hs nueva completa
+  - no se intenta preservar el `exp` original, no vale la pena la complejidad para una app
+  interna con pocos usuarios de Gerencia). Trampa encontrada y evitada: `jwt.verify()` ya
+  devuelve el payload CON `iat`/`exp` adentro - si se re-firma pasando ese payload completo
+  mas `{expiresIn}`, `jsonwebtoken` tira "Bad options.expiresIn option the payload already
+  has an exp property" - hay que descartar `iat`/`exp` antes de re-firmar.
+- Cliente: pagina nueva `client/pages/elegir-emprendimiento.js` (tarjeta centrada blanca,
+  mismo estilo que login.js), lee `sesion.emprendimientosDisponibles` via `useSesion()`, al
+  elegir uno hace POST y `window.location.href = "/"` (reload completo, mismo motivo que
+  login.js: `_app.js` solo lee `/auth/me` una vez al montar). `_app.js` redirige ahi
+  automaticamente mientras `sesion.emprendimiento` sea null, y deja quedarse si ya eligio y
+  vuelve por su cuenta (para cambiar de compañia). `Nav.js` le muestra a un usuario de
+  Gerencia la etiqueta de la compañia activa y un link "Cambiar compañia" hacia esa misma
+  pagina - el resto de Nav.js (ocultar Sist2/Bancos Cobranzas) no necesito cambios, ya
+  depende de `usuario.emprendimiento`.
+- Verificado con JWT firmado a mano contra un servidor de prueba: usuario Gerencia sin
+  elegir -> 403 en cualquier ruta de reportes; `POST /auth/elegir-emprendimiento` con
+  "ecobahia" -> cookie nueva sin el bug de exp, sist2/Bancos Cobranzas alcanzables, datos
+  reales de Ecobahia; cambio a "ecosistemas" sin logout -> sist2/Bancos Cobranzas vuelven a
+  403, Ventas por sucursal devuelve datos reales de PRD02 (mismas filas "1. BASE NEUQUEN"
+  que en la verificacion de Ecosistemas); valor invalido -> 400; un usuario NO-Gerencia
+  (ej. La Pampa) intentando `POST /auth/elegir-emprendimiento` -> 403 (no puede saltar de
+  compañia); un usuario normal de Ecobahia sigue dando 200 en rutas de reportes (el nuevo
+  check de requireAuth.js no le afecta). Build de Next.js OK (incluye la pagina nueva).
+- TODAVIA NO SE HIZO COMMIT/PUSH - queda pendiente que el usuario lo pida explicitamente.
+- Pendiente real: no existe todavia un usuario de AD real con company="Gerencia" para
+  probarlo de punta a punta en el navegador - queda para cuando lo carguen.
+
+Fix: Bases/Gastos no prorrateaba entre zonas los asientos DG (financiero) con distribucion (2026-09-23)
+- El usuario reporto que en Bases/Gastos, los asientos DG (financiero, asientos contables
+  manuales) que tienen mas de una zona/centro de costo cargados en Contabilidad Analitica
+  aparecian solo con UNA. Confirmado con datos reales antes de tocar nada: 25 lineas de DG
+  en 2026 con distribucion en 6 zonas cada una (ej. JRNENTRY 3203, cuenta 740244-01-000,
+  $211.870,96 repartidos Bahia Blanca/Puerto Madryn/Mar Del Plata/Tandil/La
+  Pampa/Emprendimientos), con importes de hasta ~$3,2M mostrandose enteros en una sola
+  zona. Mismo barrido mostro que el problema tambien afecta compras (309 lineas,
+  PMTRX/PMVVR) y pagos (1 linea, PMPAY) dentro de este mismo reporte - ya estaba
+  documentado como limitacion conocida desde el fix de multi-zona de Compras por sucursal
+  (2026-09-16): ese fix no se habia extendido a getGastos.js porque este reporte trae la
+  linea de GL20000 cruda (G.*, no agrupada por comprobante), lo que complicaba pisar
+  DEBITAMT/CRDTAMNT con el importe prorrateado.
+- Fix: mismo mecanismo que getComprasPorSucursal.js (JRNENTRY+ACTINDX+SEQNUMBR+"Id. de
+  asignacion de contabilidad analitica" como clave), pero resuelto distinto por la
+  diferencia de que este reporte usa G.*: el monto de cada asignacion se trae con un alias
+  temporal (_AA_DEBITAMT/_AA_CRDTAMNT, en vez de pisar DEBITAMT/CRDTAMNT en el mismo SELECT
+  de SQL Server, que tira ambiguedad si se repite el nombre de columna) y se usa para pisar
+  el monto en JS despues de la consulta, antes de armar la respuesta. Al agrupar tambien
+  por la asignacion (antes se colapsaban todas con MAX(), como en el bug original de
+  Compras), el LEFT JOIN ahora devuelve varias filas por linea de GL20000 cuando
+  corresponde - una por zona, cada una con su parte proporcional. Si una linea no tiene
+  ninguna asignacion de Contabilidad Analitica, sigue viendose como una sola fila con el
+  monto completo, sin cambios de comportamiento para ese caso (la mayoria).
+  Aplica por igual a los 6 grupos del reporte (ventas/recibos/pagos/financiero/compras/otro)
+  porque comparten la misma consulta - no se intento limitar solo a financiero.
+- Validado contra datos reales (PRD08): el asiento de prueba (JRNENTRY 3203) ahora aparece
+  como 6 filas de $97.460,64/$27.543,22/$40.255,48/$12.712,26/$12.712,26/$21.187,10 que
+  suman exacto $211.870,96, cada una con su Zona correcta. Barrido de todo junio/2026: el
+  total DEBITAMT/CRDTAMNT de "financiero" (y de los otros 5 grupos) sigue cerrando exacto
+  contra el DEBITAMT/CRDTAMNT crudo de GL20000 sin ninguna diferencia (mismo total, la
+  cantidad de filas subio de 201 a 249 por el prorrateo, como se esperaba). sist2 y
+  Ecosistemas (que no usan este fix - sist2 tiene otro esquema de Contabilidad Analitica,
+  Ecosistemas la tiene vacia) siguen funcionando sin errores. Confirmado que el cliente
+  (ResultTable.js) usa key={i} por indice, no depende de que cada fila sea una linea de GL
+  unica, asi que no necesito ningun cambio ahi.
+  Efecto secundario correcto: un usuario restringido por sucursal ahora ve solo SU porcion
+  real de una linea distribuida (antes podia ver el 100% si su zona ganaba el MAX(), o 0%
+  si no) - coincideSucursal ya filtraba por ZONA_DESC despues de armar filasVisibles, sin
+  cambios necesarios ahi.
+- TODAVIA NO SE HIZO COMMIT/PUSH - queda pendiente que el usuario lo pida explicitamente.

@@ -126,6 +126,16 @@ export default function Nav({ usuario, onLogout }) {
         })}
 
         <div className="ml-auto flex items-center gap-3 text-sm">
+          {usuario?.esGerencia && (
+            <>
+              <span className="opacity-80">
+                {usuario.emprendimientosDisponibles?.find((e) => e.value === usuario.emprendimiento)?.label}
+              </span>
+              <Link href="/elegir-emprendimiento" className="opacity-80 hover:opacity-100 underline">
+                Cambiar compañía
+              </Link>
+            </>
+          )}
           {usuario && <span className="opacity-80">{usuario.nombre}</span>}
           <button onClick={cerrarSesion} className="opacity-80 hover:opacity-100 underline">
             Cerrar sesión
