@@ -1,7 +1,7 @@
-const { getGpPoolEcobahia, getGpPoolEcosistemas, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, sql } = require('../../config/gpPool');
 const { getOverridesMap } = require('../../services/clasificacionOverrides');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa };
 
 // Reporte - Ventas por provincia: igual que Ventas por sucursal, pero agrupa SOP30200 por
 // STATE (provincia de la ficha del cliente/comprobante) en vez de PHONE3. Misma lógica de

@@ -12,6 +12,13 @@
 //   - organizacion = "Ecosistemas Patagonicos" => acceso completo al emprendimiento
 //     Ecosistemas Patagónicos (PRD02) - no tiene sucursales propias todavía (a pedido
 //     del usuario), así que siempre es acceso completo dentro de ese emprendimiento.
+//   - organizacion = "Ecoportatiles" => acceso completo al emprendimiento Ecoportatiles
+//     (PRD09) - tiene sucursales cargadas en Contabilidad Analítica (Choele Choel, Viedma)
+//     pero el usuario confirmó que por ahora nadie queda restringido a una sola, igual que
+//     Ecosistemas.
+//   - organizacion = "BAXPA" => acceso completo al emprendimiento BAXPA (PRD06) - también
+//     tiene sucursales cargadas (Santa Fe, Rosario) pero el usuario confirmó lo mismo:
+//     acceso completo para todos por ahora.
 //   - organizacion = "Gerencia" => no está atada a NINGÚN emprendimiento fijo - elige cuál
 //     quiere ver después de loguearse (ver emprendimientoDeSesion/EMPRENDIMIENTOS_DISPONIBLES
 //     más abajo y api/src/routes/authRouter.js -> POST /auth/elegir-emprendimiento).
@@ -30,17 +37,19 @@ const normalizarNombreSucursal = (s) => (s || '')
   .toUpperCase();
 
 const ORGANIZACION_ECOSISTEMAS = 'ECOSISTEMAS PATAGONICOS';
+const ORGANIZACION_ECOPORTATILES = 'ECOPORTATILES';
+const ORGANIZACION_BAXPA = 'BAXPA';
 const ORGANIZACION_GERENCIA = 'GERENCIA';
 
 const esAccesoCompleto = (organizacion) => {
   const valor = normalizarNombreSucursal(organizacion);
-  return valor === '' || valor === 'ECOBAHIA' || valor === ORGANIZACION_ECOSISTEMAS || valor === ORGANIZACION_GERENCIA;
+  return valor === '' || valor === 'ECOBAHIA' || valor === ORGANIZACION_ECOSISTEMAS || valor === ORGANIZACION_ECOPORTATILES || valor === ORGANIZACION_BAXPA || valor === ORGANIZACION_GERENCIA;
 };
 
 // Sucursal a la que un usuario restringido queda limitado, o null si tiene acceso
 // completo. Para usar en los controllers: filtrar por esto cuando no sea null. Solo
-// aplica dentro de Ecobahia - Ecosistemas y Gerencia nunca caen acá porque siempre son
-// acceso completo.
+// aplica dentro de Ecobahia - Ecosistemas, Ecoportatiles, BAXPA y Gerencia nunca caen acá
+// porque siempre son acceso completo.
 const sucursalDeSesion = (usuarioSesion) => {
   const organizacion = usuarioSesion?.organizacion;
   return esAccesoCompleto(organizacion) ? null : organizacion.trim();
@@ -53,25 +62,32 @@ const esGerencia = (usuarioSesion) => normalizarNombreSucursal(usuarioSesion?.or
 // /auth/login en authRouter.js, que exponen esta misma lista como "emprendimientosDisponibles").
 // Agregar un emprendimiento nuevo acá es solo el primer paso: también hace falta darle su
 // propio pool/config de GP y sumarlo a los controllers correspondientes (mismo trabajo que
-// llevó Ecosistemas Patagónicos).
+// llevó Ecosistemas Patagónicos, Ecoportatiles y BAXPA).
 const EMPRENDIMIENTOS_DISPONIBLES = [
   { value: 'ecobahia', label: 'Ecobahia' },
   { value: 'ecosistemas', label: 'Ecosistemas Patagónicos' },
+  { value: 'ecoportatiles', label: 'Ecoportatiles' },
+  { value: 'baxpa', label: 'BAXPA' },
 ];
 
-// Emprendimiento (base de datos de GP) al que pertenece la sesión: 'ecosistemas' si la
-// organización de AD es "Ecosistemas Patagonicos", 'ecobahia' en cualquier otro caso
-// (vacío, "Ecobahia", o cualquier sucursal de Ecobahia - todas viven en la misma base).
+// Emprendimiento (base de datos de GP) al que pertenece la sesión: 'ecosistemas'/
+// 'ecoportatiles'/'baxpa' si la organización de AD coincide con esas, 'ecobahia' en
+// cualquier otro caso (vacío, "Ecobahia", o cualquier sucursal de Ecobahia - todas viven
+// en la misma base).
 // Gerencia es un caso aparte: no tiene un emprendimiento fijo, así que se resuelve por lo
 // que haya elegido (claim "emprendimientoElegido" del JWT, ver POST /auth/elegir-emprendimiento) -
 // null si todavía no eligió, o si el valor guardado ya no es una opción válida (se
 // revalida contra EMPRENDIMIENTOS_DISPONIBLES en cada request, no solo al emitir el token).
 const EMPRENDIMIENTO_ECOBAHIA = 'ecobahia';
 const EMPRENDIMIENTO_ECOSISTEMAS = 'ecosistemas';
+const EMPRENDIMIENTO_ECOPORTATILES = 'ecoportatiles';
+const EMPRENDIMIENTO_BAXPA = 'baxpa';
 
 const emprendimientoDeSesion = (usuarioSesion) => {
   const valor = normalizarNombreSucursal(usuarioSesion?.organizacion);
   if (valor === ORGANIZACION_ECOSISTEMAS) return EMPRENDIMIENTO_ECOSISTEMAS;
+  if (valor === ORGANIZACION_ECOPORTATILES) return EMPRENDIMIENTO_ECOPORTATILES;
+  if (valor === ORGANIZACION_BAXPA) return EMPRENDIMIENTO_BAXPA;
   if (valor === ORGANIZACION_GERENCIA) {
     const elegido = usuarioSesion?.emprendimientoElegido;
     return EMPRENDIMIENTOS_DISPONIBLES.some((e) => e.value === elegido) ? elegido : null;
@@ -95,7 +111,7 @@ const coincideSucursal = (valorGP, sucursalUsuario) => {
 // del desarrollador) siempre puede entrar, tenga o no company cargado.
 const ORGANIZACIONES_CON_ACCESO = [
   'ECOBAHIA', 'TANDIL', 'LA PAMPA', 'BAHIA BLANCA', 'MAR DEL PLATA', 'PUERTO MADRYN',
-  ORGANIZACION_ECOSISTEMAS, ORGANIZACION_GERENCIA,
+  ORGANIZACION_ECOSISTEMAS, ORGANIZACION_ECOPORTATILES, ORGANIZACION_BAXPA, ORGANIZACION_GERENCIA,
 ];
 const USUARIOS_CON_ACCESO_SIEMPRE = ['broscheitcb'];
 

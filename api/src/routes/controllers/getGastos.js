@@ -1,7 +1,7 @@
-const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolSist2, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolSist2, sql } = require('../../config/gpPool');
 const { coincideSucursal } = require('../../services/autorizacion');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, sist2: getGpPoolSist2 };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, sist2: getGpPoolSist2 };
 
 // Endpoint 3 - Gastos (GL)
 // GL20000 = detalle de movimientos posteados al mayor. GL00100 = maestro de cuentas
@@ -246,15 +246,37 @@ const getGastos = async ({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, emp
   // Ecosistemas (PRD02) tiene su propio plan de cuentas: ahí "Egresos Operativos" es la
   // categoría 26 y no existe una categoría separada de "Egresos No Operativos" (a
   // diferencia de PRD08 que sí separa 16/17) - confirmado contra GL00102 de PRD02.
+  // Ecoportatiles (PRD09) sí tiene las dos categorías separadas, igual que PRD08, pero con
+  // otros números: "Egresos Operativos" = 14, "Egresos No Operativos" = 15 - confirmado
+  // contra GL00102 de PRD09.
+  // BAXPA (PRD06) es un caso distinto: tiene un plan de cuentas mucho más granular (74
+  // categorías) donde "Egresos Operativos" está partido en 12 sub-categorías (30-41,
+  // "Alquileres", "Honorarios", "Sueldos", etc. cada una aparte) en vez de 1 o 2 grandes
+  // como en el resto - confirmado con datos reales de OPV/EGRE que un pago ahí puede
+  // saldar casi cualquier tipo de pasivo (impuestos, proveedores, sueldos, tarjetas), no
+  // solo "gasto operativo" en sentido estricto. Armar una lista blanca de todas esas
+  // categorías sería frágil (se rompería con cualquier categoría nueva que aparezca en
+  // datos futuros). Por eso acá se invierte la lógica a lista NEGRA: en vez de "incluir
+  // solo estas categorías de gasto", se "excluye solo las de movimiento de caja real" -
+  // categoría 26 ("Bancos", la salida de dinero real, dominante y negativa en los datos) y
+  // categoría 72 ("Cheques Diferidos", mismo rol). Validado contra datos reales de
+  // OPV/EGRE: son las únicas dos categorías con neto fuertemente negativo (signo de
+  // contrapartida de pago) - todo lo demás que aparece (impuestos, proveedores, sueldos,
+  // cargas sociales, Visa, gastos varios) es la contraparte real que se está pagando.
   const CUENTA_CATEGORIA_GASTO_POR_EMPRESA = {
-    ecobahia: [16, 17],
-    sist2: [16, 17],
-    ecosistemas: [26],
+    ecobahia: { modo: 'incluir', categorias: [16, 17] },
+    sist2: { modo: 'incluir', categorias: [16, 17] },
+    ecosistemas: { modo: 'incluir', categorias: [26] },
+    ecoportatiles: { modo: 'incluir', categorias: [14, 15] },
+    baxpa: { modo: 'excluir', categorias: [26, 72] },
   };
-  const CUENTA_CATEGORIA_GASTO = CUENTA_CATEGORIA_GASTO_POR_EMPRESA[empresa];
+  const configGasto = CUENTA_CATEGORIA_GASTO_POR_EMPRESA[empresa];
   const pagosOPV = grupos.pagos.filter((row) => {
     const ref = String(row.ORCTRNUM || '');
-    return (ref.includes('OPV') || ref.includes('EGRE')) && CUENTA_CATEGORIA_GASTO.includes(row.CuentaCategoria);
+    const esGastoReal = configGasto.modo === 'excluir'
+      ? !configGasto.categorias.includes(row.CuentaCategoria)
+      : configGasto.categorias.includes(row.CuentaCategoria);
+    return (ref.includes('OPV') || ref.includes('EGRE')) && esGastoReal;
   });
 
   const armarRespuesta = (rows) => {

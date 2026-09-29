@@ -1,4 +1,4 @@
-const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolSist2, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolSist2, sql } = require('../../config/gpPool');
 const {
   resolverSucursalSist2,
   CLIENTE_SUCURSAL_JOIN_SIST2,
@@ -6,7 +6,7 @@ const {
   esNotaCreditoSist2,
 } = require('../../services/sist2Ventas');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, sist2: getGpPoolSist2 };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, sist2: getGpPoolSist2 };
 
 // Endpoint 1 - Ventas
 // SOP30200 = cabecera de historial de ventas (facturas/notas posteadas), campo de sucursal

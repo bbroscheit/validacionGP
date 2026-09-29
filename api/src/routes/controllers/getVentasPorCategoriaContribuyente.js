@@ -1,6 +1,6 @@
-const { getGpPoolEcobahia, getGpPoolEcosistemas, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, sql } = require('../../config/gpPool');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa };
 
 // Reporte - Ventas por categoría de cuenta y tipo de contribuyente
 // Categoría = GL00100.USERDEF2 (uno de los 4 campos "definidos por el usuario" de la
@@ -31,11 +31,19 @@ const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas }
 // no códigos universales (mismo hallazgo que en getComprasPorSucursal.js). Mapeo de
 // Ecosistemas (PRD02) confirmado contra su plan de cuentas real: categoría 13 = "I.V.A
 // Saldo a Pagar/Débito Fiscal/Retenciones" (equivalente a "Cargas Fiscales a pagar" de
-// PRD08), cuenta 112110-02-000 = "DEUDORES POR VENTAS".
+// PRD08), cuenta 112110-02-000 = "DEUDORES POR VENTAS". Ecoportatiles (PRD09) confirmado
+// contra su plan de cuentas real: categoría 27 = "Cargas Fiscales a pagar" (incluye
+// "DEBITO FISCAL IVA"), cuenta 113110-01-000 = "DEUDORES POR VENTAS LOCALES" (mismo
+// número que PRD08). BAXPA (PRD06) confirmado contra su plan de cuentas real (sin sufijo
+// "-01-000" en los números de cuenta acá): categoría 17 = "Cargas Fiscales - A.F.I.P a
+// Pagar" (incluye "IVA-DEBITO F.21% Y 19%"), cuenta 113110 = "DEUDORES POR VENTAS" (mismo
+// número que Ecobahia, sin el sufijo).
 const MONEDA_VACIA = 'En Blanco';
 const CONFIG_EMPRESA = {
   ecobahia: { cuentaDeudores: '113110-01-000', accatnumImpuestos: 30 },
   ecosistemas: { cuentaDeudores: '112110-02-000', accatnumImpuestos: 13 },
+  ecoportatiles: { cuentaDeudores: '113110-01-000', accatnumImpuestos: 27 },
+  baxpa: { cuentaDeudores: '113110', accatnumImpuestos: 17 },
 };
 const MAX_ROWS = 100000;
 

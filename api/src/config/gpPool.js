@@ -1,8 +1,10 @@
 const sql = require('mssql');
-const { gpConfigEcobahia, gpConfigEcosistemas, gpConfigSist2 } = require('./gpConfig');
+const { gpConfigEcobahia, gpConfigEcosistemas, gpConfigEcoportatiles, gpConfigBaxpa, gpConfigSist2 } = require('./gpConfig');
 
 let poolPromiseEcobahia;
 let poolPromiseEcosistemas;
+let poolPromiseEcoportatiles;
+let poolPromiseBaxpa;
 let poolPromiseSist2;
 
 // Pool compartido: mssql ya maneja el pooling de conexiones internamente,
@@ -32,6 +34,28 @@ function getGpPoolEcosistemas() {
   return poolPromiseEcosistemas;
 }
 
+// Ecoportatiles (PRD09) - mismo servidor que Ecobahia, pool propio.
+function getGpPoolEcoportatiles() {
+  if (!poolPromiseEcoportatiles) {
+    poolPromiseEcoportatiles = new sql.ConnectionPool(gpConfigEcoportatiles).connect();
+    poolPromiseEcoportatiles.catch(() => {
+      poolPromiseEcoportatiles = null;
+    });
+  }
+  return poolPromiseEcoportatiles;
+}
+
+// BAXPA (PRD06) - mismo servidor que Ecobahia, pool propio.
+function getGpPoolBaxpa() {
+  if (!poolPromiseBaxpa) {
+    poolPromiseBaxpa = new sql.ConnectionPool(gpConfigBaxpa).connect();
+    poolPromiseBaxpa.catch(() => {
+      poolPromiseBaxpa = null;
+    });
+  }
+  return poolPromiseBaxpa;
+}
+
 // Segundo servidor GP ("sist2", 172.19.31.47) - mismo patrón que Ecobahia, pool propio
 // porque son dos SQL Server físicamente distintos.
 function getGpPoolSist2() {
@@ -44,4 +68,4 @@ function getGpPoolSist2() {
   return poolPromiseSist2;
 }
 
-module.exports = { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolSist2, sql };
+module.exports = { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolSist2, sql };

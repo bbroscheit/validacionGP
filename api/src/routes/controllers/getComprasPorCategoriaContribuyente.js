@@ -1,6 +1,6 @@
-const { getGpPoolEcobahia, getGpPoolEcosistemas, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, sql } = require('../../config/gpPool');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa };
 
 // Reporte - Compras por categoría de cuenta y tipo de contribuyente
 // Mismo esquema que getVentasPorCategoriaContribuyente.js pero para compras: GL20000
@@ -20,7 +20,8 @@ const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas }
 //
 // OJO: estos números (ACCATNUM y cuentas) son configuración propia de cada compañía GP,
 // no códigos universales - ver el mismo comentario en getComprasPorSucursal.js. Mapeo de
-// Ecosistemas (PRD02) confirmado contra su plan de cuentas real.
+// Ecosistemas (PRD02), Ecoportatiles (PRD09) y BAXPA (PRD06) confirmado contra sus planes
+// de cuentas reales.
 //
 // RI (Gravado) vs RI (No Gravado): dentro de "RI" hay comprobantes que mezclan, en el
 // MISMO comprobante, un tramo gravado y un tramo no gravado (ej. FC A0044-00123808:
@@ -50,6 +51,16 @@ const CONFIG_EMPRESA = {
     accatnumImpuestos: 37,
     accatnumBancos: 22,
   },
+  ecoportatiles: {
+    cuentasContrapartida: ['211101-01-000'],
+    accatnumImpuestos: 9,
+    accatnumBancos: 20,
+  },
+  baxpa: {
+    cuentasContrapartida: ['211101', '213224', '213225', '213226'],
+    accatnumImpuestos: 49,
+    accatnumBancos: 26,
+  },
 };
 const MAX_ROWS = 100000;
 const TAXDTLID_GRAVADO = ['IVACF 10.5%', 'IVACF 21%', 'IVACF 27%'];
@@ -62,12 +73,12 @@ const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta, emp
 
   const pool = await POOLS[empresa]();
   const { cuentasContrapartida: CUENTAS_CONTRAPARTIDA, accatnumImpuestos: ACCATNUM_IMPUESTOS, accatnumBancos: ACCATNUM_BANCOS } = CONFIG_EMPRESA[empresa];
+  const cuentaContrapartidaInClause = CUENTAS_CONTRAPARTIDA.map((_, i) => `@cuentaContrapartida${i}`).join(', ');
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
     request.input('fechaHasta', sql.DateTime, new Date(fechaHasta));
-    request.input('cuentaContrapartida1', sql.VarChar(75), CUENTAS_CONTRAPARTIDA[0]);
-    request.input('cuentaContrapartida2', sql.VarChar(75), CUENTAS_CONTRAPARTIDA[1]);
+    CUENTAS_CONTRAPARTIDA.forEach((cuenta, i) => request.input(`cuentaContrapartida${i}`, sql.VarChar(75), cuenta));
     request.input('accatnumImpuestos', sql.Int, ACCATNUM_IMPUESTOS);
     request.input('accatnumBancos', sql.Int, ACCATNUM_BANCOS);
     return request;
@@ -101,7 +112,7 @@ const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta, emp
       LTRIM(RTRIM(G.SOURCDOC)) IN ('PMTRX', 'PMVVR')
       AND G.TRXDATE >= @fechaDesde
       AND G.TRXDATE <= @fechaHasta
-      AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (@cuentaContrapartida1, @cuentaContrapartida2)
+      AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (${cuentaContrapartidaInClause})
       AND A.ACCATNUM <> @accatnumImpuestos
       AND A.ACCATNUM <> @accatnumBancos
       ${noAnuladaWhere}
@@ -139,7 +150,7 @@ const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta, emp
       LTRIM(RTRIM(G.SOURCDOC)) IN ('PMTRX', 'PMVVR')
       AND G.TRXDATE >= @fechaDesde
       AND G.TRXDATE <= @fechaHasta
-      AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (@cuentaContrapartida1, @cuentaContrapartida2)
+      AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (${cuentaContrapartidaInClause})
       AND A.ACCATNUM <> @accatnumImpuestos
       AND A.ACCATNUM <> @accatnumBancos
       ${noAnuladaWhere}

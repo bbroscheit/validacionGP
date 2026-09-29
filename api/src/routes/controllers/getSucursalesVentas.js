@@ -1,7 +1,7 @@
-const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolSist2 } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolSist2 } = require('../../config/gpPool');
 const { resolverSucursalSist2, CLIENTE_SUCURSAL_JOIN_SIST2, CLIENTE_SUCURSAL_SELECT_SIST2 } = require('../../services/sist2Ventas');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, sist2: getGpPoolSist2 };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, sist2: getGpPoolSist2 };
 
 // Lista de sucursales para poblar el selector de los reportes de ventas.
 // Ecobahia: SOP30200.PHONE3 directo. Se filtra el valor vacío: esos comprobantes ya se

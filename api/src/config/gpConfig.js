@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const {
   GP_USER, GP_PASSWORD, GP_SERVER, GP_DATABASE_ECOBAHIA, GP_DATABASE_ECOSISTEMAS,
+  GP_DATABASE_ECOPORTATILES, GP_DATABASE_BAXPA,
   GP2_USER, GP2_PASSWORD, GP2_SERVER, GP2_DATABASE_SIST2,
 } = process.env;
 
@@ -26,6 +27,20 @@ const gpConfigEcosistemas = {
   database: GP_DATABASE_ECOSISTEMAS,
 };
 
+// Ecoportatiles: tercer emprendimiento, mismo servidor y credenciales que Ecobahia
+// (confirmado contra PRD09 directo - mismo esquema de tablas), solo cambia la base.
+const gpConfigEcoportatiles = {
+  ...gpConfigEcobahia,
+  database: GP_DATABASE_ECOPORTATILES,
+};
+
+// BAXPA: cuarto emprendimiento, mismo servidor y credenciales que Ecobahia (confirmado
+// contra PRD06 directo - mismo esquema de tablas), solo cambia la base.
+const gpConfigBaxpa = {
+  ...gpConfigEcobahia,
+  database: GP_DATABASE_BAXPA,
+};
+
 // Servidor "sist2" (172.19.31.47, empresa "sist2 ecobahia"): encrypt debe ir en false -
 // con true, mssql tira error de negociación TLS (versión de protocolo vieja de ese SQL
 // Server, incompatible con el default de Node/OpenSSL). Confirmado al conectar por
@@ -43,4 +58,4 @@ const gpConfigSist2 = {
   },
 };
 
-module.exports = { gpConfigEcobahia, gpConfigEcosistemas, gpConfigSist2 };
+module.exports = { gpConfigEcobahia, gpConfigEcosistemas, gpConfigEcoportatiles, gpConfigBaxpa, gpConfigSist2 };

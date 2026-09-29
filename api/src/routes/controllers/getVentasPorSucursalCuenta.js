@@ -1,9 +1,9 @@
-const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolSist2, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolSist2, sql } = require('../../config/gpPool');
 const { resolverSucursalSist2, CLIENTE_SUCURSAL_JOIN_SIST2, CLIENTE_SUCURSAL_SELECT_SIST2 } = require('../../services/sist2Ventas');
 const { coincideSucursal } = require('../../services/autorizacion');
 const { getOverridesMap } = require('../../services/clasificacionOverrides');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, sist2: getGpPoolSist2 };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, sist2: getGpPoolSist2 };
 
 // Reporte - Ventas por sucursal y cuenta contable
 // GL20000 filtrado por SOURCDOC = 'SJ' (asientos generados por el módulo de ventas,
@@ -12,9 +12,17 @@ const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, 
 // guarda la sucursal ahí - por eso se cruza G.ORDOCNUM (número de comprobante) contra
 // SOP30200.SOPNUMBE para traer la sucursal (PHONE3 en Ecobahia; en sist2, las 3 fuentes
 // de services/sist2Ventas.js - PHONE3 -> DOCID -> ficha del cliente).
-// Se excluye la cuenta de deudores por ventas (113110-01-000) a pedido: es la
-// contrapartida de cobro, no una cuenta que "factura" nada. Confirmado que sist2 usa el
-// mismo plan de cuentas (mismo código, misma descripción "DEUDORES POR VENTAS LOCALES").
+// Se excluye la cuenta de deudores por ventas a pedido: es la contrapartida de cobro, no
+// una cuenta que "factura" nada. Confirmado que sist2 usa el mismo plan de cuentas que
+// Ecobahia (mismo código, misma descripción "DEUDORES POR VENTAS LOCALES").
+// OJO: el número de cuenta es configuración propia de cada compañía GP - Ecosistemas usa
+// una cuenta distinta (112110-02-000, mismo hallazgo que en getVentasPorCategoriaContribuyente.js).
+// BAXPA (PRD06) usa el mismo número de cuenta que Ecobahia (113110) pero sin el sufijo
+// "-01-000" - ese plan de cuentas no usa esa convención de segmentos.
+// FIX (2026-09-23): este archivo tenía la cuenta hardcodeada sin indexar por empresa
+// (a diferencia de su hermano getVentasPorCategoriaContribuyente.js, que sí quedó bien
+// resuelto al onboardear Ecosistemas) - Ecosistemas estaba excluyendo la cuenta
+// equivocada, dejando su contrapartida de cobro adentro del Neto por error.
 // El monto por cuenta es CRDTAMNT - DEBITAMT: en una factura normal las cuentas de
 // venta/impuestos van al haber, en una nota de crédito GP invierte debe/haber - la resta
 // ya da el signo correcto sin tener que detectar la nota de crédito a mano.
@@ -23,7 +31,13 @@ const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, 
 // el agrupado se calcula en JS a partir de ese mismo detalle, así el Excel de control
 // (pestaña "Base" + pestaña "Resultado") es una suma verificable línea por línea.
 const MONEDA_VACIA = 'En Blanco';
-const CUENTA_DEUDORES = '113110-01-000';
+const CUENTA_DEUDORES_POR_EMPRESA = {
+  ecobahia: '113110-01-000',
+  ecosistemas: '112110-02-000',
+  ecoportatiles: '113110-01-000',
+  baxpa: '113110',
+  sist2: '113110-01-000',
+};
 const MAX_ROWS = 100000;
 
 const getVentasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, soloConP = true, empresa = 'ecobahia', sucursalRestringida = null }) => {
@@ -35,12 +49,13 @@ const getVentasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, soloConP = t
   if (!getPool) throw new Error(`Empresa desconocida: "${empresa}"`);
   const pool = await getPool();
   const soloConPBool = soloConP === false || soloConP === 'false' ? false : true;
+  const cuentaDeudores = CUENTA_DEUDORES_POR_EMPRESA[empresa];
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
     request.input('fechaHasta', sql.DateTime, new Date(fechaHasta));
     request.input('soloConP', sql.Bit, soloConPBool);
-    request.input('cuentaDeudores', sql.VarChar(75), CUENTA_DEUDORES);
+    request.input('cuentaDeudores', sql.VarChar(75), cuentaDeudores);
     return request;
   };
 

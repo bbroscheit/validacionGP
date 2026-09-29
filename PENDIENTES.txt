@@ -1389,3 +1389,154 @@ Fix: Bases/Gastos no prorrateaba entre zonas los asientos DG (financiero) con di
   si no) - coincideSucursal ya filtraba por ZONA_DESC despues de armar filasVisibles, sin
   cambios necesarios ahi.
 - TODAVIA NO SE HIZO COMMIT/PUSH - queda pendiente que el usuario lo pida explicitamente.
+
+Feature: tercer emprendimiento Ecoportatiles (PRD09) (2026-09-24)
+- El usuario pidio sumar un tercer emprendimiento, Ecoportatiles (PRD09, mismo servidor y
+  credenciales que Ecobahia, ya agregado a .env como GP_DATABASE_ECOPORTATILES), con los
+  mismos reportes que Ecobahia salvo sist2 (no hay credenciales todavia, pero el usuario
+  aviso que este emprendimiento tambien tiene ese sistema - se dejo el guardrail existente
+  intacto para que sea trivial sumarlo despues). Organizacion de AD confirmada: literal
+  "Ecoportatiles". Sin restriccion por sucursal por ahora (confirmado por el usuario, igual
+  que Ecosistemas) aunque a diferencia de Ecosistemas, PRD09 SI tiene sucursales reales
+  cargadas en Contabilidad Analitica (Choele Choel, Viedma) - por si en el futuro se pide
+  restringir usuarios a una de ellas. Se sumo tambien a EMPRENDIMIENTOS_DISPONIBLES asi
+  Gerencia puede elegirlo (confirmado por el usuario).
+- Exploracion previa contra PRD09 (antes de escribir codigo, mismo metodo que Ecosistemas):
+  mismas 13 tablas relevantes, AATransactions con las mismas columnas Y con datos reales
+  (1328 filas, a diferencia de Ecosistemas que estaba vacia). SOP30200.PHONE3 NO varia por
+  sucursal ahi (siempre "ECOPORTATILES", a diferencia de Ecobahia/Ecosistemas) - no es un
+  bug de la app, es como esta cargada la data; "Ventas por sucursal" va a mostrar casi todo
+  bajo un unico bucket para esta compania.
+- Confirmado (otra vez) que ACCATNUM es configuracion propia de cada compania GP - PRD09
+  tiene su propio plan de cuentas, parecido pero NO igual al de Ecobahia (faltan/sobran
+  algunas categorias intermedias, corriendo la numeracion). Investigado y validado contra
+  datos reales de Compras (igual que se hizo con Ecosistemas):
+  - Categoria 9 = "Creditos Fiscales" (coincide con Ecobahia).
+  - Categoria 20 = "Bancos" (Ecobahia: 22).
+  - Categoria 27 = "Cargas Fiscales a pagar"/IVA Debito Fiscal, para Ventas (Ecobahia: 30).
+  - Categorias 14+15 = "Egresos Operativos"/"Egresos No Operativos" (Ecobahia: 16+17) -
+    a diferencia de Ecosistemas, PRD09 SI tiene las dos categorias separadas.
+  - Cuenta 211101-01-000 "AV.-PROVEEDORES VARIOS" y cuenta 113110-01-000 "DEUDORES POR
+    VENTAS LOCALES" coinciden con el mismo numero exacto que en Ecobahia (categoria
+    distinta, no importa, se filtra por numero de cuenta). Validado que 211101-01-000 es
+    la UNICA cuenta de contrapartida de pago con movimiento real en Compras 2026 (a
+    diferencia de Ecobahia que tiene 2 - Proveedores y Visa Frances) - excluyendola junto
+    con la categoria 20 completa, el Neto de Compras da $462.617.654,11 e Impuestos
+    $85.403.972,87 (ene-ago), ambos positivos y razonables.
+- Como Ecoportatiles solo necesita 1 cuenta de contrapartida (no 2 como Ecobahia/Ecosistemas),
+  se aprovecho para generalizar `cuentasContrapartida` de un array de longitud fija a
+  longitud variable en getComprasPorSucursal.js y getComprasPorCategoriaContribuyente.js -
+  el fragmento SQL `NOT IN (...)` y el bindeo de parametros ahora se arman dinamicamente
+  segun la cantidad real de cuentas, en vez de asumir siempre exactamente 2. Deja mejor
+  preparado el terreno para los proximos emprendimientos (no todos van a tener exactamente
+  2 cuentas de contrapartida).
+- Se generalizo tambien `resolverEmpresa` en validacionRouter.js: antes era un ternario de
+  2 vias hardcodeado especificamente a 'ecosistemas' (`req.emprendimiento === 'ecosistemas'
+  ? 'ecosistemas' : ...`) - ahora es `req.emprendimiento !== 'ecobahia' ? req.emprendimiento
+  : ...`, generico para cualquier emprendimiento no-ecobahia. No hizo falta ningun cambio en
+  soloEcobahia.js ni en Nav.js (client) - los dos ya comparaban `!== 'ecobahia'`, no
+  `=== 'ecosistemas'`, asi que ya bloqueaban/ocultaban sist2 y Bancos Cobranzas para
+  cualquier emprendimiento nuevo automaticamente.
+- Se sumo `ecoportatiles: getGpPoolEcoportatiles` al mapa POOLS de los 15 controllers que
+  ya tenian el patron (mismo que Ecosistemas) mas api/src/services/libroIvaDigitalData.js
+  (que alimenta Libro IVA Digital resumen/export) - no esta en controllers/, facil de
+  pasar por alto.
+- BUG PREEXISTENTE encontrado y corregido de paso: getVentasPorSucursalCuenta.js tenia
+  `CUENTA_DEUDORES = '113110-01-000'` hardcodeado a nivel de modulo, SIN indexar por
+  empresa - a diferencia de su archivo hermano (getVentasPorCategoriaContribuyente.js), que
+  si quedo bien resuelto por compania cuando se onboardeo Ecosistemas. Esto significaba que
+  el reporte estaba excluyendo, para Ecosistemas, la cuenta EQUIVOCADA (113110-01-000 en vez
+  de la real 112110-02-000), dejando la contrapartida de cobro adentro del Neto por error.
+  Se arreglo con el mismo patron CONFIG_EMPRESA que su hermano. Validado: el total de
+  Ecosistemas en este reporte ahora cierra exacto contra el Neto+Impuestos de "Ventas por
+  sucursal" ($5.672.360.299,56 en ambos, ene-ago/2026) - antes del fix no cerraba. Ecobahia
+  y Ecoportatiles no cambiaron (misma cuenta 113110-01-000 en los dos).
+- Validado extensamente contra datos reales de PRD09 (sin HTTP): los 14 controllers/
+  servicios devuelven datos reales sin errores SQL. Cruces que cierran exacto entre si
+  (misma logica de validacion cruzada usada en Ecosistemas): getComprasPorCategoriaContribuyente
+  = Neto de getComprasPorSucursal ($463.269.036,31 en ambos, ene-sep/2026); Ecobahia sigue
+  funcionando igual que siempre en todos los reportes tocados.
+- Verificado HTTP con JWT firmado a mano: `/auth/me` con organizacion="Ecoportatiles" da
+  emprendimiento correcto; una ruta de reportes sin `?empresa=...` ya devuelve datos reales
+  de PRD09 (resolverEmpresa fuerza el valor solo); sist2 y Bancos Cobranzas dan 403; el
+  gate de login (tieneAccesoALaApp) acepta "Ecoportatiles"; un usuario Gerencia ahora ve las
+  3 opciones (Ecobahia/Ecosistemas Patagonicos/Ecoportatiles) y elegir "ecoportatiles" via
+  POST /auth/elegir-emprendimiento funciona igual que las otras dos. Un usuario normal de
+  Ecobahia sigue dando 200 sin cambios. Build de Next.js OK (sin cambios de cliente
+  necesarios - todo lo que ya se generalizo para Gerencia/soloEcobahia/Nav.js sigue
+  funcionando sin tocar nada).
+- Fuera de alcance, a proposito: sist2 para Ecoportatiles (sin credenciales todavia) y
+  restriccion de acceso por sucursal dentro de Ecoportatiles (Choele Choel/Viedma) - el
+  usuario confirmo que por ahora no hace falta ninguna de las dos.
+- TODAVIA NO SE HIZO COMMIT/PUSH - queda pendiente que el usuario lo pida explicitamente.
+
+Feature: cuarto emprendimiento BAXPA (PRD06) (2026-09-25)
+- Mismo pedido que Ecoportatiles: sumar BAXPA (PRD06, mismo servidor/credenciales que
+  Ecobahia, ya en .env como GP_DATABASE_BAXPA) con los mismos reportes salvo sist2 (BAXPA
+  tambien tiene ese sistema pero sin credenciales todavia - se dejo preparado y bloqueado,
+  mismo guardrail que Ecoportatiles). Organizacion de AD confirmada: literal "BAXPA". Sin
+  restriccion por sucursal por ahora (confirmado por el usuario) aunque BAXPA SI tiene
+  sucursales reales cargadas en Contabilidad Analitica (Santa Fe, Rosario). Se sumo a
+  EMPRENDIMIENTOS_DISPONIBLES (Gerencia ahora elige entre 4).
+- Complicacion nueva encontrada en esta vuelta: el plan de cuentas de BAXPA es MUCHO mas
+  granular que el de los otros 3 (74 categorias GL00102, vs ~35-39 en el resto), con
+  "Egresos Operativos" partido en 12 sub-categorias (30-41: Alquileres, Honorarios,
+  Sueldos, etc. cada una aparte) en vez de 1 o 2 grandes categorias "paraguas". Ademas los
+  numeros de cuenta NO usan el sufijo "-01-000" que si usan Ecobahia/Ecosistemas/
+  Ecoportatiles (ej. "211101" en vez de "211101-01-000").
+- Investigado y validado contra datos reales (mismo metodo que las vueltas anteriores):
+  - Categoria 49 = "Creditos Fiscales" (impuestos compras), categoria 26 = "Bancos"
+    (6 cuentas, todas bancarias, confirmado - exclusion en bloque segura).
+  - Categoria 17 = "Cargas Fiscales - A.F.I.P a Pagar", incluye "IVA-DEBITO F.21% Y 19%"
+    (impuestos ventas) - no hay una categoria "Cargas Fiscales a pagar" generica como en el
+    resto, esta partida en A.F.I.P/Municipales/Rentas, solo la primera tiene el IVA.
+  - Cuenta 211101 "AV-PROVEEDORES VARIOS" (mismo numero que Ecobahia, sin sufijo) y cuenta
+    113110 "DEUDORES POR VENTAS" (idem). A diferencia de Ecoportatiles, BAXPA SI tiene mas
+    de una cuenta de contrapartida de pago en Compras: 3 tarjetas Visa a pagar (213224
+    BBVA, 213225 Galicia, 213226 ICBC) ademas de Proveedores - las 3 viven en una categoria
+    "Otros Pasivos" (54) que NO se pudo excluir entera porque tambien tiene cuentas
+    legitimas mezcladas (comisiones, prestamos, anticipos de clientes) - se listaron las 4
+    cuentas puntuales en cuentasContrapartida en vez de la categoria completa. Validado:
+    con esa exclusion + categoria 26 completa, Neto de Compras da $522.040.151,56 e
+    Impuestos $133.148.392,12 (muestra amplia), ambos positivos.
+  - Gastos OPV/EGRE (getGastos.js): con 12 sub-categorias de "gasto" en vez de 1-2, armar
+    una lista blanca como en el resto hubiera sido fragil (se rompe con cualquier
+    categoria nueva que aparezca despues). Se invirtio la logica para BAXPA especificamente:
+    en vez de "incluir solo estas categorias de gasto", se "excluye solo las 2 de
+    movimiento de caja real" (categoria 26 Bancos y categoria 72 Cheques Diferidos, las
+    unicas con neto fuertemente negativo en datos reales de OPV/EGRE - todo lo demas que
+    aparece ahi, desde impuestos hasta sueldos hasta tarjetas, es la contraparte real que
+    se esta pagando). Se generalizo CUENTA_CATEGORIA_GASTO_POR_EMPRESA a
+    `{modo: 'incluir'|'excluir', categorias: [...]}` por compania en vez de siempre-lista-
+    blanca - las otras 4 companias siguen en modo 'incluir' sin cambios de comportamiento.
+    Validado: pagosOPV de BAXPA (496 filas en una muestra de 7 meses) usa exactamente las
+    16 categorias esperadas (17,18,19,27,28,32,33,37,38,39,43,44,51,54,62,63), ninguna es
+    26 ni 72.
+- Validado extensamente contra datos reales de PRD06: los 15 controllers/servicios
+  devuelven datos reales sin errores SQL. getComprasPorCategoriaContribuyente = Neto de
+  getComprasPorSucursal exacto ($463.520.789,51 en ambos). Los 6 grupos de Gastos
+  (ventas/recibos/pagos/financiero/compras/otro) cierran debito=credito exacto.
+- Durante la validacion cruzada de Ventas (getVentasPorSucursal vs
+  getVentasPorCategoriaContribuyente) aparecio una diferencia de $397.500 usando el rango
+  de fechas completo de los datos (dic/2025 a nov/2026) - investigado a fondo: NO es un
+  bug de esta implementacion, es que los dos reportes filtran por columnas de fecha
+  distintas a proposito (getVentasPorSucursal usa SOP30200.DOCDATE, getVentasPorCategoriaContribuyente
+  usa GL20000.TRXDATE - mismo tipo de desfasaje ya encontrado y documentado antes para
+  Libro IVA Digital de Compras) y el rango de prueba tocaba los bordes extremos de los
+  datos, exponiendo comprobantes con DOCDATE de un lado del borde y TRXDATE del otro.
+  Confirmado con un rango interior seguro (feb-ago/2026): los dos reportes cierran exacto
+  (diferencia de 0,000001, ruido de punto flotante). No hizo falta ningun cambio de
+  codigo - es un comportamiento preexistente que ya afecta a las otras 3 companias igual,
+  solo que no se habia notado antes porque los rangos de prueba anteriores no llegaban a
+  los bordes de los datos.
+- Verificado HTTP con JWT firmado a mano: `/auth/me` con organizacion="BAXPA" da
+  emprendimiento correcto; una ruta de reportes sin `?empresa=...` ya devuelve datos
+  reales de PRD06; sist2 y Bancos Cobranzas dan 403; el gate de login acepta "BAXPA"; un
+  usuario Gerencia ahora ve las 4 opciones y elegir "baxpa" via POST
+  /auth/elegir-emprendimiento funciona igual que las otras 3. Un usuario normal de
+  Ecobahia sigue dando 200 sin cambios. Build de Next.js OK (sin cambios de cliente
+  necesarios).
+- Fuera de alcance, a proposito: sist2 para BAXPA (sin credenciales todavia) y
+  restriccion de acceso por sucursal dentro de BAXPA (Santa Fe/Rosario) - el usuario
+  confirmo que por ahora no hace falta ninguna de las dos.
+- TODAVIA NO SE HIZO COMMIT/PUSH - queda pendiente que el usuario lo pida explicitamente.

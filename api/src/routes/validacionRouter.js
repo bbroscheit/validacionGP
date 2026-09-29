@@ -26,12 +26,13 @@ const bloquearSiRestringido = require('../middlewares/bloquearSiRestringido.js')
 const soloEcobahia = require('../middlewares/soloEcobahia.js');
 
 // Emprendimiento (base de GP) efectivo para esta request: si el usuario logueado es de
-// Ecosistemas Patagónicos, SIEMPRE se fuerza 'ecosistemas' del lado del servidor sin
-// importar qué mande el cliente - así ninguna request puede terminar pegándole a la base
-// de otra compañía. Para usuarios de Ecobahia se preserva el comportamiento de siempre:
-// el cliente puede elegir 'ecobahia'/'sist2' donde ya existía esa opción (query
+// cualquier emprendimiento que no sea Ecobahia (Ecosistemas Patagónicos, Ecoportatiles, o
+// lo que elija un usuario de Gerencia), SIEMPRE se fuerza ese valor del lado del servidor
+// sin importar qué mande el cliente - así ninguna request puede terminar pegándole a la
+// base de otra compañía. Para usuarios de Ecobahia se preserva el comportamiento de
+// siempre: el cliente puede elegir 'ecobahia'/'sist2' donde ya existía esa opción (query
 // ?empresa=...), o se usa 'ecobahia' por default donde nunca existió esa opción.
-const resolverEmpresa = (req) => (req.emprendimiento === 'ecosistemas' ? 'ecosistemas' : (req.query.empresa || 'ecobahia'));
+const resolverEmpresa = (req) => (req.emprendimiento !== 'ecobahia' ? req.emprendimiento : (req.query.empresa || 'ecobahia'));
 
 // Endpoint 1 - Ventas: SOP30200/SOP30300 filtrado por sucursal y fechas
 // Bloqueado para usuarios restringidos por sucursal (services/autorizacion.js): esta

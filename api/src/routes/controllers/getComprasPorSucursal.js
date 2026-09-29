@@ -1,8 +1,8 @@
-const { getGpPoolEcobahia, getGpPoolEcosistemas, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, sql } = require('../../config/gpPool');
 const { coincideSucursal } = require('../../services/autorizacion');
 const { getOverridesMap } = require('../../services/clasificacionOverrides');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa };
 
 // Reporte - Compras por sucursal (zona de Contabilidad Analítica)
 // A diferencia de Ventas, las compras (PM10000/PM20000/PM30200) no tienen un campo de
@@ -57,7 +57,23 @@ const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas }
 // los valores de Ecosistemas se confirmaron contra el plan de cuentas real de PRD02
 // (GL00100/GL00102): categoría 37 = "Créditos Fiscales", categoría 22 = "Bancos" (coincide
 // con PRD08), 211110-01-000 = "PROVEEDORES", 211210-01-000 = "TARJETA CORPORATIVA VISA -
-// CREDICOOP".
+// CREDICOOP". Ecoportatiles (PRD09) confirmado contra su propio plan de cuentas: categoría
+// 9 = "Créditos Fiscales" (coincide con PRD08), categoría 20 = "Bancos", 211101-01-000 =
+// "AV.-PROVEEDORES VARIOS" (mismo número que PRD08) - es la ÚNICA cuenta de contrapartida
+// con movimiento real en Compras (validado: sin una segunda cuenta tipo "Visa a pagar"
+// como en Ecobahia, por eso acá `cuentasContrapartida` tiene un solo elemento).
+// BAXPA (PRD06) tiene un plan de cuentas mucho más granular (74 categorías, sin el sufijo
+// "-01-000" en los números de cuenta) - categoría 49 = "Créditos Fiscales", categoría 26 =
+// "Bancos" (cuentas 100% bancarias, confirmado). Acá SÍ hay varias cuentas de contrapartida
+// de pago aparte de Proveedores (211101): 3 tarjetas Visa a pagar (213224 BBVA, 213225
+// Galicia, 213226 ICBC), todas dentro de una categoría "Otros Pasivos" (54) que NO se
+// puede excluir entera porque también tiene cuentas legítimas mezcladas (comisiones,
+// préstamos, anticipos de clientes) - por eso se listan las 4 cuentas puntuales en vez de
+// excluir la categoría. Validado: excluyendo esas 4 cuentas + categoría 26 completa, el
+// Neto de Compras da $522.040.151,56 e Impuestos $133.148.392,12, ambos positivos y
+// razonables.
+// `cuentasContrapartida` es de longitud variable (no siempre 2) - se arma un fragmento
+// `NOT IN (@cuentaContrapartida0, @cuentaContrapartida1, ...)` según la cantidad real.
 const MONEDA_VACIA = 'En Blanco';
 const CONFIG_EMPRESA = {
   ecobahia: {
@@ -70,6 +86,16 @@ const CONFIG_EMPRESA = {
     accatnumImpuestos: 37,
     accatnumBancos: 22,
   },
+  ecoportatiles: {
+    cuentasContrapartida: ['211101-01-000'],
+    accatnumImpuestos: 9,
+    accatnumBancos: 20,
+  },
+  baxpa: {
+    cuentasContrapartida: ['211101', '213224', '213225', '213226'],
+    accatnumImpuestos: 49,
+    accatnumBancos: 26,
+  },
 };
 const MAX_ROWS = 100000;
 
@@ -80,12 +106,12 @@ const getComprasPorSucursal = async ({ fechaDesde, fechaHasta, empresa = 'ecobah
 
   const pool = await POOLS[empresa]();
   const { cuentasContrapartida: CUENTAS_CONTRAPARTIDA, accatnumBancos: ACCATNUM_BANCOS, accatnumImpuestos: ACCATNUM_IMPUESTOS } = CONFIG_EMPRESA[empresa];
+  const cuentaContrapartidaInClause = CUENTAS_CONTRAPARTIDA.map((_, i) => `@cuentaContrapartida${i}`).join(', ');
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
     request.input('fechaHasta', sql.DateTime, new Date(fechaHasta));
-    request.input('cuentaContrapartida1', sql.VarChar(75), CUENTAS_CONTRAPARTIDA[0]);
-    request.input('cuentaContrapartida2', sql.VarChar(75), CUENTAS_CONTRAPARTIDA[1]);
+    CUENTAS_CONTRAPARTIDA.forEach((cuenta, i) => request.input(`cuentaContrapartida${i}`, sql.VarChar(75), cuenta));
     request.input('accatnumBancos', sql.Int, ACCATNUM_BANCOS);
     return request;
   };
@@ -121,7 +147,7 @@ const getComprasPorSucursal = async ({ fechaDesde, fechaHasta, empresa = 'ecobah
       LTRIM(RTRIM(G.SOURCDOC)) IN ('PMTRX', 'PMVVR')
       AND G.TRXDATE >= @fechaDesde
       AND G.TRXDATE <= @fechaHasta
-      AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (@cuentaContrapartida1, @cuentaContrapartida2)
+      AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (${cuentaContrapartidaInClause})
       AND A.ACCATNUM <> @accatnumBancos
       ${noAnuladaWhere}
   `);
@@ -165,7 +191,7 @@ const getComprasPorSucursal = async ({ fechaDesde, fechaHasta, empresa = 'ecobah
         LTRIM(RTRIM(G.SOURCDOC)) IN ('PMTRX', 'PMVVR')
         AND G.TRXDATE >= @fechaDesde
         AND G.TRXDATE <= @fechaHasta
-        AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (@cuentaContrapartida1, @cuentaContrapartida2)
+        AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (${cuentaContrapartidaInClause})
         AND A.ACCATNUM <> @accatnumBancos
         ${noAnuladaWhere}
       ORDER BY Sucursal ASC, G.TRXDATE ASC
