@@ -163,10 +163,10 @@ export default function BancosCobranzasMovimientos() {
   return (
     <div>
       <h1 className="text-xl font-semibold mb-1">Bancos Cobranzas - Movimientos</h1>
-      <p className="text-sm text-gray-600 mb-4">
+      {/* <p className="text-sm text-gray-600 mb-4">
         Subí el excel de cada banco (queda guardado, no hace falta volver a subirlo para consultarlo),
         filtrá por rango de fechas y completá el número de cliente cuando GP no pudo identificarlo solo.
-      </p>
+      </p> */}
 
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div role="tablist" aria-label="Banco" className="inline-flex gap-1 bg-gray-100 rounded-lg p-1">
