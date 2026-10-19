@@ -21,7 +21,7 @@ const getCobranzasSist2 = require('./controllers/getCobranzasSist2.js');
 const getClientesSist2 = require('./controllers/getClientesSist2.js');
 const getCuentaCorrienteSist2 = require('./controllers/getCuentaCorrienteSist2.js');
 const { putOverrideClasificacion, deleteOverrideClasificacion } = require('./controllers/overridesClasificacion.js');
-const { procesarCobranzasBanco } = require('./controllers/procesarCobranzasBanco.js');
+const { subirMovimientos, listarMovimientos, actualizarNumeroManual } = require('../services/movimientosBanco.js');
 const bloquearSiRestringido = require('../middlewares/bloquearSiRestringido.js');
 const soloEcobahia = require('../middlewares/soloEcobahia.js');
 
@@ -324,19 +324,52 @@ validacionRouter.delete('/overrides/clasificacion', async (req, res) => {
   }
 });
 
-// Bancos Cobranzas > Resumen: sube un excel de movimientos de un banco (formato propio
-// por banco) y devuelve el mismo excel con una columna "Número de Cliente" agregada,
-// buscando cada movimiento en la base de clientes de GP (RM00101) por CUIT o nombre.
-// Bloqueado para Ecosistemas Patagónicos: por ahora solo busca contra el RM00101 de
-// Ecobahia (ver services/clientesGp.js), no tiene sentido mostrarlo a otra compañía.
-validacionRouter.post('/bancos-cobranzas/:banco/procesar', soloEcobahia, async (req, res) => {
+// Bancos Cobranzas > Movimientos: sube un excel de movimientos de un banco (formato
+// propio por banco), busca el cliente de GP para cada fila (RM00101, por CUIT o nombre -
+// ver services/clientesGp.js) y lo persiste (Postgres propio, ver
+// services/movimientosBanco.js) para poder consultarlo después por rango de fechas sin
+// tener que volver a subir el excel. Bloqueado para Ecosistemas Patagónicos: por ahora
+// solo busca contra el RM00101 de Ecobahia, no tiene sentido mostrarlo a otra compañía.
+validacionRouter.post('/bancos-cobranzas/:banco/movimientos', soloEcobahia, async (req, res) => {
   try {
     const { banco } = req.params;
     const { filas } = req.body;
-    const data = await procesarCobranzasBanco({ banco, filas });
-    res.status(200).json({ filas: data });
+    const data = await subirMovimientos({ banco, filas });
+    res.status(200).json(data);
   } catch (e) {
-    console.log('error en POST /bancos-cobranzas/:banco/procesar', e.message);
+    console.log('error en POST /bancos-cobranzas/:banco/movimientos', e.message);
+    if (e.tipo === 'CONFLICTO_FILAS') {
+      res.status(409).json({ state: 'error', message: e.message, conflictos: e.conflictos });
+      return;
+    }
+    if (e.tipo === 'FORMATO_INVALIDO') {
+      res.status(422).json({ state: 'error', message: e.message, errores: e.errores });
+      return;
+    }
+    res.status(500).json({ state: 'error', message: e.message });
+  }
+});
+
+validacionRouter.get('/bancos-cobranzas/:banco/movimientos', soloEcobahia, async (req, res) => {
+  try {
+    const { banco } = req.params;
+    const { desde, hasta, busqueda, soloFaltantes } = req.query;
+    const data = await listarMovimientos({ banco, desde, hasta, busqueda, soloFaltantes });
+    res.status(200).json(data);
+  } catch (e) {
+    console.log('error en GET /bancos-cobranzas/:banco/movimientos', e.message);
+    res.status(500).json({ state: 'error', message: e.message });
+  }
+});
+
+validacionRouter.put('/bancos-cobranzas/movimientos/:id/numero-cliente', soloEcobahia, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { custnmbrManual } = req.body;
+    const data = await actualizarNumeroManual({ id, custnmbrManual, usuario: req.usuario?.usuario });
+    res.status(200).json(data);
+  } catch (e) {
+    console.log('error en PUT /bancos-cobranzas/movimientos/:id/numero-cliente', e.message);
     res.status(500).json({ state: 'error', message: e.message });
   }
 });

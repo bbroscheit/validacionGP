@@ -1540,3 +1540,69 @@ Feature: cuarto emprendimiento BAXPA (PRD06) (2026-09-25)
   restriccion de acceso por sucursal dentro de BAXPA (Santa Fe/Rosario) - el usuario
   confirmo que por ahora no hace falta ninguna de las dos.
 - TODAVIA NO SE HIZO COMMIT/PUSH - queda pendiente que el usuario lo pida explicitamente.
+
+Bancos Cobranzas: persistencia + pantalla de Movimientos (2026-10-19)
+- Pedido del usuario: "Bancos Cobranzas > Resumen" (subir excel de un banco, descargarlo
+  de vuelta con la columna "Numero de Cliente" agregada) no tenia memoria - nada se
+  guardaba. Pidio persistencia, una pantalla con filtro de rango de fechas que muestre en
+  tabla lo mismo que el excel descargado, filas sin cliente identificado mostrando su
+  leyenda (NO ENCONTRADO / VARIOS: ...) con un input para escribir el numero a mano, y
+  filtro por cliente o por "sin identificar". Mockup armado y aprobado antes de
+  implementar: https://claude.ai/artifact/X8xZYZhKAn743Gt111fN6W
+- Diseño: se reusa la base Postgres propia de la app (Sequelize, la misma que
+  ClasificacionOverride) con un modelo nuevo `MovimientoBanco`
+  (api/src/models/MovimientoBanco.js, tabla `movimientos_banco`) en vez de forzar el
+  shape comprobante+tipo+valor de ClasificacionOverride - ahi no hay un "original" de GP
+  para refetchear, el excel del banco ES la fuente una vez subido.
+- `claveFila` (hash MD5 de banco+fecha+concepto+importe+observaciones, indice unico) es
+  la clave natural de cada fila: permite re-subir el mismo excel sin duplicar (upsert:
+  actualiza estadoMatch/custnmbrCalculado/estadoBanco, nunca toca
+  custnmbrManual/usuarioManual/fechaManual si el usuario ya resolvio esa fila a mano) y
+  detectar, DENTRO de un mismo excel, filas que quedan indistinguibles entre si - decision
+  del usuario: en ese caso no se guarda nada del archivo, se devuelve la lista de filas en
+  conflicto (fecha/concepto/importe/numeros de fila) para que corrija el excel (borrar la
+  repetida, o agregarle algo que la distinga si son operaciones reales de verdad) y lo
+  vuelva a subir.
+- Parseo de FECHA (DD/MM/AAAA) e IMPORTE ("125.000,00", punto de miles y coma decimal -
+  formato confirmado por el usuario, no habia ningun excel de ejemplo con estas dos
+  columnas ya documentado) movido a api/src/services/movimientosBanco.js junto con el
+  resto de la logica que antes vivia en controllers/procesarCobranzasBanco.js (CUIT en
+  CONCEPTO, buscarCliente contra RM00101) - ese archivo se elimino, nada mas lo usaba.
+  Igual que con los conflictos, si una fila tiene fecha/importe que no se puede
+  interpretar se rechaza el excel entero con el detalle (fila, columna, valor crudo) en
+  vez de guardar a medias.
+- 3 rutas nuevas en validacionRouter.js (mismo middleware `soloEcobahia` que ya tenia la
+  ruta vieja): `POST/GET /bancos-cobranzas/:banco/movimientos` y
+  `PUT /bancos-cobranzas/movimientos/:id/numero-cliente`. El usuario que graba un numero
+  manual sale de `req.usuario.usuario` (ya lo pone requireAuth en toda request) en vez del
+  `usuario` que manda el cliente en el body - mejor que el patron de
+  `/overrides/clasificacion`, donde ese campo se manda pero el cliente nunca lo llena.
+- Pantalla nueva client/pages/bancos-cobranzas/movimientos.js (reemplaza a resumen.js,
+  eliminado) siguiendo el mockup: tabs de banco, Desde/Hasta, buscador (debounce 300ms,
+  igual que el combobox de cliente de cuenta-corriente.js), checkbox "solo sin
+  identificar", boton "Subir Excel de <Banco>" con el nombre del banco activo (el usuario
+  habia notado que antes el boton no decia para cual banco era). Edicion inline del numero
+  manual: input directo en la fila (sin modo "editar"/"guardar" separado, a diferencia de
+  DocumentosClasificacionModal.js), se guarda solo al salir del campo o con Enter.
+  Nav.js: link "Resumen" -> "Movimientos" (el filtro que oculta todo el grupo "Bancos
+  Cobranzas" para no-Ecobahia no cambio, ya depende de usuario.emprendimiento).
+  `exportAoaToExcel` en client/functions/exportToExcel.js se elimino: quedo sin ningun
+  caller al borrar resumen.js.
+- Verificado con VPN activa: script contra la base Postgres real + GP real de Ecobahia
+  cubriendo alta nueva, re-upload identico (actualiza sin duplicar), edicion manual
+  preservada en un re-upload posterior, conflicto de 2 filas iguales (rechaza todo el
+  archivo, no persiste nada), fecha/importe invalidos (rechaza con el detalle), filtro de
+  busqueda y de "solo faltantes" - los ~18 chequeos pasaron todos contra datos reales (CUIT
+  real de RM00101 identificado correctamente como cliente "1", CUIT inexistente marcado
+  no_encontrado).
+- Verificado HTTP end to end con un server de prueba propio (puerto 3091, para no pisar
+  ningun proceso activo en 3001) y JWT firmado a mano: GET con rango de fechas, POST de
+  alta (200), POST con conflicto (409 + detalle), PUT de numero manual reflejado en un GET
+  posterior, 403 para un usuario de organizacion "Ecosistemas Patagonicos" en las 3 rutas
+  nuevas. Datos de prueba borrados de Postgres al terminar. Build de Next.js OK
+  (`/bancos-cobranzas/movimientos` aparece en el listado de rutas, `resumen` ya no).
+- Fuera de alcance, a proposito: exportar a excel desde la pantalla nueva (no se pidio, la
+  tabla en pantalla ya cubre lo que antes requeria descargar el excel) y recalcular
+  custnmbrCalculado para filas viejas sin volver a subir el excel si cambia la base de
+  clientes de GP.
+- TODAVIA NO SE HIZO COMMIT/PUSH - queda pendiente que el usuario lo pida explicitamente.

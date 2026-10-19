@@ -3,6 +3,7 @@ require('dotenv').config();
 const server = require('./src/app.js');
 const { sequelize } = require('./src/bd.js');
 require('./src/models/ClasificacionOverride.js');
+require('./src/models/MovimientoBanco.js');
 const { PORT } = process.env;
 
 sequelize.sync()

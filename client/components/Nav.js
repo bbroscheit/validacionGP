@@ -53,7 +53,7 @@ const menus = [
   {
     label: "Bancos Cobranzas",
     links: [
-      { href: "/bancos-cobranzas/resumen", label: "Resumen" },
+      { href: "/bancos-cobranzas/movimientos", label: "Movimientos" },
     ],
   },
 ];
