@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/functions/apiFetch";
-import { leerExcelFilas } from "@/functions/leerExcelFilas";
+import { leerExcelHojas } from "@/functions/leerExcelHojas";
 
 const BANCOS = [
   { id: "credicoop", nombre: "Credicoop" },
@@ -29,6 +29,18 @@ function formatFecha(iso) {
   return `${d}/${m}/${y}`;
 }
 
+// El excel que entregan los bancos ahora trae las 4 hojas (una por banco) en un solo
+// archivo - el nombre de cada hoja debería ser el id del banco, pero no tenemos un excel
+// real a mano para confirmar mayúsculas/acentos exactos, así que se normaliza antes de
+// comparar (sin tildes, minúscula, sin espacios de más).
+function normalizarNombreHoja(s) {
+  return (s || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
 function BadgeResuelto({ fila }) {
   const numero = fila.custnmbrManual || fila.custnmbrCalculado;
   const nota = fila.custnmbrManual ? "Asignado manualmente" : null;
@@ -52,16 +64,12 @@ export default function BancosCobranzasMovimientos() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [erroresFormato, setErroresFormato] = useState(null);
-  const [conflictos, setConflictos] = useState(null);
-  const [resumenSubida, setResumenSubida] = useState(null);
+  const [resultadosSubida, setResultadosSubida] = useState(null);
   const [subiendo, setSubiendo] = useState(false);
   const [borrador, setBorrador] = useState({});
   const [guardandoId, setGuardandoId] = useState(null);
   const inputFileRef = useRef(null);
   const debounceRef = useRef(null);
-
-  const nombreBanco = BANCOS.find((b) => b.id === banco)?.nombre || banco;
 
   const consultar = async () => {
     if (!desde || !hasta) return;
@@ -93,33 +101,53 @@ export default function BancosCobranzasMovimientos() {
     return () => clearTimeout(debounceRef.current);
   }, [busquedaInput]);
 
-  const subirArchivo = async (e) => {
+  // El excel que sube el usuario trae una hoja por banco (credicoop/chubut/provincia/
+  // frances, en cualquier orden) - se procesa cada hoja por separado contra el endpoint
+  // de siempre (una hoja = un banco = el mismo contrato de antes), así un conflicto o un
+  // error de formato en un banco no bloquea a los demás.
+  const subirArchivoBancos = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
     setSubiendo(true);
     setError("");
-    setConflictos(null);
-    setErroresFormato(null);
-    setResumenSubida(null);
+    setResultadosSubida(null);
     try {
-      const filas = await leerExcelFilas(file);
-      const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/bancos-cobranzas/${banco}/movimientos`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filas }),
-      });
-      const json = await res.json();
-      if (res.status === 409) {
-        setConflictos(json.conflictos || []);
-        return;
+      const hojas = await leerExcelHojas(file);
+      const resultados = [];
+
+      for (const hoja of hojas) {
+        const bancoHoja = BANCOS.find((b) => normalizarNombreHoja(b.id) === normalizarNombreHoja(hoja.nombreHoja));
+        if (!bancoHoja) {
+          resultados.push({ tipo: "no_reconocida", nombreHoja: hoja.nombreHoja });
+          continue;
+        }
+        if (!Array.isArray(hoja.filas) || hoja.filas.length < 2) {
+          resultados.push({ tipo: "vacia", banco: bancoHoja.id, nombreBanco: bancoHoja.nombre });
+          continue;
+        }
+        try {
+          const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/bancos-cobranzas/${bancoHoja.id}/movimientos`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ filas: hoja.filas }),
+          });
+          const json = await res.json();
+          if (res.status === 409) {
+            resultados.push({ tipo: "conflicto", banco: bancoHoja.id, nombreBanco: bancoHoja.nombre, conflictos: json.conflictos || [] });
+          } else if (res.status === 422) {
+            resultados.push({ tipo: "formato_invalido", banco: bancoHoja.id, nombreBanco: bancoHoja.nombre, errores: json.errores || [] });
+          } else if (!res.ok) {
+            resultados.push({ tipo: "error", banco: bancoHoja.id, nombreBanco: bancoHoja.nombre, mensaje: json.message || "Error al procesar" });
+          } else {
+            resultados.push({ tipo: "ok", banco: bancoHoja.id, nombreBanco: bancoHoja.nombre, ...json });
+          }
+        } catch (err) {
+          resultados.push({ tipo: "error", banco: bancoHoja.id, nombreBanco: bancoHoja.nombre, mensaje: err.message });
+        }
       }
-      if (res.status === 422) {
-        setErroresFormato(json.errores || []);
-        return;
-      }
-      if (!res.ok) throw new Error(json.message || "Error al procesar el archivo");
-      setResumenSubida(json);
+
+      setResultadosSubida(resultados);
       await consultar();
     } catch (err) {
       setError(err.message);
@@ -163,10 +191,12 @@ export default function BancosCobranzasMovimientos() {
   return (
     <div>
       <h1 className="text-xl font-semibold mb-1">Bancos Cobranzas - Movimientos</h1>
-      {/* <p className="text-sm text-gray-600 mb-4">
-        Subí el excel de cada banco (queda guardado, no hace falta volver a subirlo para consultarlo),
-        filtrá por rango de fechas y completá el número de cliente cuando GP no pudo identificarlo solo.
-      </p> */}
+      <p className="text-sm text-gray-600 mb-4">
+        Subí el excel con las 4 hojas (Credicoop, Chubut, Provincia y Francés) - queda
+        guardado, no hace falta volver a subirlo para consultarlo. Elegí un banco con las
+        pestañas para ver sus movimientos, filtrar por rango de fechas y completar el
+        número de cliente cuando GP no pudo identificarlo solo.
+      </p>
 
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div role="tablist" aria-label="Banco" className="inline-flex gap-1 bg-gray-100 rounded-lg p-1">
@@ -187,15 +217,15 @@ export default function BancosCobranzasMovimientos() {
         </div>
 
         <label className="inline-flex items-center gap-2 bg-[var(--color-primary)] text-white rounded px-3 py-1.5 text-sm font-medium cursor-pointer disabled:opacity-60">
-          {subiendo ? "Procesando..." : `Subir Excel de ${nombreBanco}`}
+          {subiendo ? "Procesando..." : "Subir Excel de bancos"}
           <input
             ref={inputFileRef}
             type="file"
             accept=".xlsx,.xls"
             disabled={subiendo}
-            onChange={subirArchivo}
+            onChange={subirArchivoBancos}
             className="hidden"
-            aria-label={`Subir Excel de ${nombreBanco}`}
+            aria-label="Subir Excel de bancos (una hoja por banco)"
           />
         </label>
       </div>
@@ -226,61 +256,80 @@ export default function BancosCobranzasMovimientos() {
 
       {error && <p className="text-red-600 mb-4">{error}</p>}
 
-      {resumenSubida && (
-        <p className="text-green-700 bg-green-50 border border-green-200 rounded px-3 py-2 text-sm mb-4">
-          Archivo procesado: {resumenSubida.insertados} fila(s) nueva(s), {resumenSubida.actualizados} actualizada(s) de {resumenSubida.totalFilas} en total.
-        </p>
-      )}
-
-      {erroresFormato && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-          <p className="text-sm font-semibold text-red-700 mb-2">
-            No se cargó el archivo: hay filas con fecha o importe que no se pudieron interpretar
-          </p>
-          <ul className="text-xs text-red-700 list-disc pl-5">
-            {erroresFormato.map((e, i) => (
-              <li key={i}>Fila {e.numeroFila}, columna {e.columna}: &quot;{e.valorCrudo}&quot;</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {conflictos && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-red-700 mb-1">No se cargó el archivo: hay filas iguales entre sí</p>
-              <p className="text-xs text-red-700 max-w-2xl">
-                Estas filas tienen la misma fecha, concepto, importe y observaciones, así que no se puede saber si son
-                una sola operación repetida en el excel o dos operaciones reales. Si es la misma operación repetida,
-                borrá la fila de más; si son operaciones reales, agregale a una algo que la distinga (por ejemplo un
-                comentario en Observaciones) y volvé a subirlo.
-              </p>
+      {resultadosSubida && (
+        <div className="flex flex-col gap-3 mb-4">
+          {resultadosSubida.map((r, i) => (
+            <div
+              key={i}
+              className={`rounded-lg border p-3 ${
+                r.tipo === "ok"
+                  ? "bg-green-50 border-green-200"
+                  : r.tipo === "vacia" || r.tipo === "no_reconocida"
+                  ? "bg-gray-50 border-gray-200"
+                  : "bg-red-50 border-red-200"
+              }`}
+            >
+              {r.tipo === "no_reconocida" && (
+                <p className="text-sm text-gray-600">
+                  La hoja &quot;{r.nombreHoja}&quot; no se reconoce como ninguno de los 4 bancos - se ignoró.
+                </p>
+              )}
+              {r.tipo === "vacia" && (
+                <p className="text-sm text-gray-600">{r.nombreBanco}: la hoja no tiene filas de datos.</p>
+              )}
+              {r.tipo === "ok" && (
+                <p className="text-sm text-green-700">
+                  {r.nombreBanco}: {r.insertados} fila(s) nueva(s), {r.actualizados} actualizada(s) de {r.totalFilas} en total.
+                </p>
+              )}
+              {r.tipo === "error" && (
+                <p className="text-sm text-red-700">{r.nombreBanco}: error al procesar - {r.mensaje}</p>
+              )}
+              {r.tipo === "formato_invalido" && (
+                <div>
+                  <p className="text-sm font-semibold text-red-700 mb-2">
+                    {r.nombreBanco}: no se cargó, hay filas con fecha o importe que no se pudieron interpretar
+                  </p>
+                  <ul className="text-xs text-red-700 list-disc pl-5">
+                    {r.errores.map((e, j) => (
+                      <li key={j}>Fila {e.numeroFila}, columna {e.columna}: &quot;{e.valorCrudo}&quot;</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {r.tipo === "conflicto" && (
+                <div>
+                  <p className="text-sm font-semibold text-red-700 mb-1">{r.nombreBanco}: no se cargó, hay filas iguales entre sí</p>
+                  <p className="text-xs text-red-700 max-w-2xl mb-2">
+                    Estas filas tienen la misma fecha, concepto, importe y observaciones, así que no se puede saber si
+                    son una sola operación repetida en el excel o dos operaciones reales. Si es la misma operación
+                    repetida, borrá la fila de más; si son operaciones reales, agregale a una algo que la distinga (por
+                    ejemplo un comentario en Observaciones) y volvé a subir el excel de nuevo.
+                  </p>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-left text-red-700">
+                        <th className="py-1 pr-3">Filas en la hoja</th>
+                        <th className="py-1 pr-3">Fecha</th>
+                        <th className="py-1 pr-3">Concepto</th>
+                        <th className="py-1 pr-3 text-right">Importe</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {r.conflictos.map((c, j) => (
+                        <tr key={j} className="text-red-700 border-t border-red-200">
+                          <td className="py-1 pr-3">{c.filas.join(", ")}</td>
+                          <td className="py-1 pr-3">{formatFecha(c.fecha)}</td>
+                          <td className="py-1 pr-3">{c.concepto}</td>
+                          <td className="py-1 pr-3 text-right">{formatMonto(c.importe)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
-            <button type="button" onClick={() => setConflictos(null)} className="text-red-700 text-xl leading-none px-1" aria-label="Cerrar">
-              &times;
-            </button>
-          </div>
-          <table className="w-full text-xs mt-3">
-            <thead>
-              <tr className="text-left text-red-700">
-                <th className="py-1 pr-3">Filas en el excel</th>
-                <th className="py-1 pr-3">Fecha</th>
-                <th className="py-1 pr-3">Concepto</th>
-                <th className="py-1 pr-3 text-right">Importe</th>
-              </tr>
-            </thead>
-            <tbody>
-              {conflictos.map((c, i) => (
-                <tr key={i} className="text-red-700 border-t border-red-200">
-                  <td className="py-1 pr-3">{c.filas.join(", ")}</td>
-                  <td className="py-1 pr-3">{formatFecha(c.fecha)}</td>
-                  <td className="py-1 pr-3">{c.concepto}</td>
-                  <td className="py-1 pr-3 text-right">{formatMonto(c.importe)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          ))}
         </div>
       )}
 

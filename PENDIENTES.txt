@@ -1605,4 +1605,63 @@ Bancos Cobranzas: persistencia + pantalla de Movimientos (2026-10-19)
   tabla en pantalla ya cubre lo que antes requeria descargar el excel) y recalcular
   custnmbrCalculado para filas viejas sin volver a subir el excel si cambia la base de
   clientes de GP.
+- Commit/push hecho (4ffd801).
+
+Bancos Cobranzas: el excel pasa a venir en una sola planilla con 4 hojas (2026-10-20)
+- Cambio de formato definitivo avisado por el usuario: los 4 bancos (credicoop/chubut/
+  provincia/frances) ya no se suben cada uno por separado - vienen las 4 hojas en un solo
+  excel. El layout de columnas por hoja no cambio (fecha/concepto/importe/observaciones/
+  estado), asi que el contrato del endpoint `POST /bancos-cobranzas/:banco/movimientos`
+  (api/src/services/movimientosBanco.js) no se tocó - solo cambio COMO el cliente junta
+  los datos antes de mandarlos.
+- client/functions/leerExcelFilas.js -> renombrado a leerExcelHojas.js, ahora exporta
+  `leerExcelHojas(file)` que lee TODAS las hojas del workbook (antes solo la primera).
+- client/pages/bancos-cobranzas/movimientos.js: el boton de subida deja de depender de la
+  pestaña de banco activa (antes decia "Subir Excel de <Banco>" y mandaba todo a un solo
+  banco) - ahora es "Subir Excel de bancos", lee las 4 hojas y por cada una busca a que
+  banco corresponde comparando el nombre de la hoja contra los ids conocidos
+  (normalizado: sin tildes, minuscula, sin espacios de mas - no habia un excel real a mano
+  para confirmar mayusculas/acentos exactos de las pestañas). Cada hoja se sube por
+  separado contra el mismo endpoint de siempre, asi un conflicto o un error de formato en
+  un banco no bloquea a los demas - el resultado ahora es una lista con un resultado por
+  hoja (ok/conflicto/formato invalido/error/no reconocida/vacia) en vez de un solo
+  resultado. Una hoja que no matchea ningun banco (ej. una hoja "Notas") se ignora y se
+  avisa, no se manda al servidor.
+- Verificado: build de Next.js OK. Como el usuario no pudo adjuntar el excel real, se armo
+  uno equivalente con la libreria xlsx (mismas 4 hojas con distintas variantes de
+  mayuscula/tilde en el nombre - "credicoop", "Chubut", "PROVINCIA", "Francés" - mas una
+  hoja "Notas" que no es ningun banco) y se corrio la misma logica de
+  leerExcelHojas+normalizarNombreHoja+subida contra un server de prueba real (puerto
+  3092): las 4 hojas de banco matchearon a pesar de la distinta mayuscula/tilde, la hoja
+  de Chubut (armada con 2 filas iguales a proposito) disparo el 409 de conflicto sin
+  afectar a las otras 3 que subieron OK, y "Notas" quedo marcada no_reconocida sin
+  pegarle al servidor. Datos de prueba borrados de Postgres al terminar.
+- TODAVIA NO SE HIZO COMMIT/PUSH - queda pendiente que el usuario lo pida explicitamente.
+
+Bancos Cobranzas: fix del formato real de FECHA (2026-10-20)
+- El usuario mando una captura de pantalla del excel real (7 filas, columnas FECHA/
+  CONCEPTO/IMPORTE/OBSERVACIONES/ESTADO) para confirmar el formato "definitivo". La
+  columna FECHA viene como "D M AAAA" separada por ESPACIOS (ej. "9 10 2026",
+  "14 10 2026"), no por barras ("DD/MM/AAAA") como se habia asumido en la pregunta
+  anterior sin tener un ejemplo real a mano - con el regex viejo las 7 filas habrian
+  rechazado todo el archivo como FORMATO_INVALIDO.
+- Fix de una sola linea en api/src/services/movimientosBanco.js: `FECHA_RE` paso de
+  `/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/` a `/^(\d{1,2})[/\s]+(\d{1,2})[/\s]+(\d{4})$/` (acepta
+  espacio o barra como separador, por si algun banco todavia usara barras). IMPORTE no
+  cambio - el mismo excel real confirmo que ya funcionaba bien, incluso con la columna
+  mezclando valores con "$" adelante y sin "$" en la misma hoja (ej. "$ 1.649.100,00" y
+  "101.682,00" en filas consecutivas).
+- De paso se reviso CONCEPTO/CUIT con las 7 filas reales (varias traen codigos largos de
+  cuenta tipo "027-020000718555001" o "083-00040700780001" en vez de un CUIT limpio, y
+  una sola trae "CUIT 30929278139" explicito): el regex de extraccion de CUIT
+  (CUIT_EN_TEXTO_RE) ya los maneja bien sin cambios - los codigos de 14/15/19 digitos no
+  producen ninguna ventana de 11 digitos valida (quedan pegados a mas digitos de un lado o
+  del otro) y las filas sin CUIT caen al fallback por nombre via OBSERVACIONES, igual que
+  before. No hizo falta tocar nada ahi.
+- Verificado con VPN activa: se corrio subirMovimientos con las 7 filas EXACTAS de la
+  captura (cambiando solo el año 2026->2099 para no tocar datos reales) contra la base
+  real - las 7 se guardaron sin error, las 3 fechas distintas parsearon al dia exacto
+  esperado, los 7 importes parsearon exactos (con y sin "$"), la fila con CUIT explicito
+  y la fila sin ningun numero en el concepto (puro fallback por nombre) se procesaron
+  bien. Build de Next.js OK. Datos de prueba borrados de Postgres al terminar.
 - TODAVIA NO SE HIZO COMMIT/PUSH - queda pendiente que el usuario lo pida explicitamente.

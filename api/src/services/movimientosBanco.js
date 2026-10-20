@@ -26,9 +26,13 @@ const COL_ESTADO = 4;
 // contra la primera letra del nombre sin separador.
 const CUIT_EN_TEXTO_RE = /(?<!\d)(\d{11})(?!\d)/;
 
-// Confirmado por el usuario: los 4 bancos entregan FECHA como DD/MM/AAAA e IMPORTE con
-// formato argentino ("125.000,00" - punto de miles, coma decimal).
-const FECHA_RE = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+// Confirmado contra un excel real (captura de pantalla del usuario, 2026-10-20): FECHA
+// viene como "D M AAAA" separado por espacios, NO por barras como se había asumido antes
+// de ver un ejemplo real (ej. "9 10 2026", "14 10 2026" - día sin cero a la izquierda).
+// Se acepta también "/" por las dudas, sin costo. IMPORTE sigue siendo formato argentino
+// ("125.000,00" - punto de miles, coma decimal), con o sin "$" adelante (el excel real
+// trae las dos variantes mezcladas en la misma columna).
+const FECHA_RE = /^(\d{1,2})[/\s]+(\d{1,2})[/\s]+(\d{4})$/;
 
 const parsearFecha = (valorCrudo) => {
   const texto = String(valorCrudo ?? '').trim();
