@@ -1664,4 +1664,41 @@ Bancos Cobranzas: fix del formato real de FECHA (2026-10-20)
   esperado, los 7 importes parsearon exactos (con y sin "$"), la fila con CUIT explicito
   y la fila sin ningun numero en el concepto (puro fallback por nombre) se procesaron
   bien. Build de Next.js OK. Datos de prueba borrados de Postgres al terminar.
+- Commit/push hecho (d4b0bff).
+
+Bancos Cobranzas: el excel real seguia fallando - celdas tipadas, no texto (2026-10-20)
+- El usuario probo con el excel real completo y volvio a fallar: TODAS las filas
+  rechazadas como FORMATO_INVALIDO, con FECHA llegando como "10/9/26" (mes/dia invertido,
+  año a 2 digitos) en vez de "9/10/2026" como se ve en Excel, e IMPORTE llegando con coma
+  de miles al estilo EEUU ("1,946,877.76") en vez del formato argentino de la planilla.
+- Causa raiz (reproducida a proposito con un excel armado con celdas de fecha/moneda REALES
+  de Excel, no strings - los tests anteriores habian usado filas armadas con texto plano,
+  por eso no la habian detectado): las columnas FECHA/IMPORTE del excel de los bancos son
+  celdas tipadas (fecha y moneda), no texto. leerExcelHojas.js las leia con
+  `raw: false`, que le pide a la libreria (xlsx/SheetJS) que las reformatee a string ella
+  misma - y ese formateador no respeta ni el formato visual de la celda en Excel ni la
+  zona horaria local: para una celda de fecha devolvia "10/8/26" para el 9/10/2026 real
+  (invertia dia/mes, truncaba el año a 2 digitos Y corria un dia para atras por una
+  conversion de huso horario interna). Confirmado reproduciendo el bug exacto antes de
+  arreglarlo.
+- Fix en 2 archivos:
+  - client/functions/leerExcelHojas.js: `XLSX.read(..., { cellDates: true })` +
+    `sheet_to_json(..., { raw: true })` en vez de `raw: false`. Una celda de fecha llega
+    ahora como objeto Date de JS en UTC (se serializa solo al mandarla por fetch, via
+    JSON.stringify, al string ISO "2026-10-09T00:00:00.000Z"); una celda de importe llega
+    directo como numero de JS, sin pasar por ningun formato de miles/decimales. Las
+    columnas de texto (CONCEPTO/OBSERVACIONES/ESTADO) no cambian con este flag.
+  - api/src/services/movimientosBanco.js: `parsearFecha` ahora reconoce el prefijo ISO
+    ("AAAA-MM-DD...") ademas del formato de texto D/M/AAAA o "D M AAAA" que ya tenia (se
+    mantiene como respaldo, no se saca nada); `parsearImporte` ahora devuelve el numero
+    directo cuando el valor ya es un numero de JS (celda tipada), y solo usa el parseo de
+    texto argentino ("125.000,00", con o sin "$") cuando llega como string.
+- Verificado con VPN activa: se armo un excel con celdas REALES (Date de JS + numeros,
+  no strings) replicando el bug, se confirmo que SIN el fix llegaba "10/8/26" (reproducido
+  a proposito) y CON el fix llega el ISO correcto; se corrio subirMovimientos con esas
+  filas contra la base real y la fecha/importe se guardaron exactos (sin el corrimiento de
+  dia), el CUIT real siguio matcheando al cliente correcto. Se volvio a probar el formato
+  de TEXTO viejo (D/M/AAAA, "D M AAAA", importe con "$") para confirmar que sigue
+  funcionando igual que antes (sin regresion). Build de Next.js OK. Datos de prueba
+  borrados de Postgres al terminar.
 - TODAVIA NO SE HIZO COMMIT/PUSH - queda pendiente que el usuario lo pida explicitamente.

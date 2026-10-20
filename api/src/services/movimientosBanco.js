@@ -26,17 +26,28 @@ const COL_ESTADO = 4;
 // contra la primera letra del nombre sin separador.
 const CUIT_EN_TEXTO_RE = /(?<!\d)(\d{11})(?!\d)/;
 
-// Confirmado contra un excel real (captura de pantalla del usuario, 2026-10-20): FECHA
-// viene como "D M AAAA" separado por espacios, NO por barras como se había asumido antes
-// de ver un ejemplo real (ej. "9 10 2026", "14 10 2026" - día sin cero a la izquierda).
-// Se acepta también "/" por las dudas, sin costo. IMPORTE sigue siendo formato argentino
-// ("125.000,00" - punto de miles, coma decimal), con o sin "$" adelante (el excel real
-// trae las dos variantes mezcladas en la misma columna).
-const FECHA_RE = /^(\d{1,2})[/\s]+(\d{1,2})[/\s]+(\d{4})$/;
+// FECHA/IMPORTE del excel real son celdas de fecha/moneda genuinas de Excel, no texto -
+// el cliente ahora las lee con `cellDates: true` + `raw: true` (ver leerExcelHojas.js)
+// para no depender del formateador de SheetJS, que no respeta ni el formato con el que se
+// ve la celda en Excel ni la zona horaria local (confirmado con un excel real: una fecha
+// mostrada en Excel como "9/10/2026" llegaba, formateada por la librería, como "10/8/26" -
+// mes/día invertido, año a 2 dígitos y UN DÍA MENOS). Con el cliente arreglado, una celda
+// de fecha real llega acá como el string ISO que produce `JSON.stringify` de un Date de
+// JS ("2026-10-09T00:00:00.000Z") y una celda de importe llega directo como número de JS.
+// Se mantiene el parseo de texto como respaldo (D/M/AAAA o "D M AAAA", e IMPORTE con
+// formato argentino "125.000,00") por si alguna fila viene cargada como texto en vez de
+// como celda tipada.
+const FECHA_ISO_RE = /^(\d{4})-(\d{2})-(\d{2})/;
+const FECHA_TEXTO_RE = /^(\d{1,2})[/\s]+(\d{1,2})[/\s]+(\d{4})$/;
 
 const parsearFecha = (valorCrudo) => {
   const texto = String(valorCrudo ?? '').trim();
-  const match = texto.match(FECHA_RE);
+  const isoMatch = texto.match(FECHA_ISO_RE);
+  if (isoMatch) {
+    const [, y, m, d] = isoMatch;
+    return `${y}-${m}-${d}`;
+  }
+  const match = texto.match(FECHA_TEXTO_RE);
   if (!match) return null;
   const [, d, m, y] = match;
   const dd = d.padStart(2, '0');
@@ -46,6 +57,9 @@ const parsearFecha = (valorCrudo) => {
 };
 
 const parsearImporte = (valorCrudo) => {
+  if (typeof valorCrudo === 'number') {
+    return Number.isFinite(valorCrudo) ? valorCrudo : null;
+  }
   const texto = String(valorCrudo ?? '').trim();
   if (!texto) return null;
   const negativo = /^\(.*\)$/.test(texto) || texto.startsWith('-');
