@@ -51,15 +51,20 @@ function normalizarNombreHoja(s) {
     .toLowerCase();
 }
 
-function BadgeResuelto({ fila }) {
+function BadgeResuelto({ fila, onEditar }) {
   const numero = fila.custnmbrManual || fila.custnmbrCalculado;
   const nota = fila.custnmbrManual ? "Asignado manualmente" : null;
   return (
-    <div>
-      <span className="inline-block bg-green-50 text-green-700 border border-green-200 rounded px-2 py-0.5 text-xs font-semibold">
-        {numero}
-      </span>
-      {nota && <div className="text-[11px] text-gray-500 mt-0.5">{nota}</div>}
+    <div className="flex items-start gap-2">
+      <div>
+        <span className="inline-block bg-green-50 text-green-700 border border-green-200 rounded px-2 py-0.5 text-xs font-semibold">
+          {numero}
+        </span>
+        {nota && <div className="text-[11px] text-gray-500 mt-0.5">{nota}</div>}
+      </div>
+      <button type="button" onClick={onEditar} className="text-blue-600 text-xs hover:underline">
+        editar
+      </button>
     </div>
   );
 }
@@ -79,6 +84,7 @@ export default function BancosCobranzasMovimientos() {
   const [resultadosSubida, setResultadosSubida] = useState(null);
   const [subiendo, setSubiendo] = useState(false);
   const [borrador, setBorrador] = useState({});
+  const [editandoId, setEditandoId] = useState(null);
   const [guardandoId, setGuardandoId] = useState(null);
   const [guardandoReciboId, setGuardandoReciboId] = useState(null);
   const inputFileRef = useRef(null);
@@ -208,11 +214,15 @@ export default function BancosCobranzasMovimientos() {
   const guardarNumeroManual = async (fila) => {
     const valor = borrador[fila.id];
     if (valor === undefined) return;
-    if (valor.trim() === (fila.custnmbrManual || "")) {
+    // Comparado contra lo que el input ya mostraba (manual, o si no había manual el
+    // calculado por el sistema) - abrir "editar" en una fila ya identificada y cerrar sin
+    // tocar nada no debe generar una asignación manual de la nada.
+    if (valor.trim() === (fila.custnmbrManual || fila.custnmbrCalculado || "")) {
       setBorrador((prev) => {
         const { [fila.id]: _omit, ...resto } = prev;
         return resto;
       });
+      setEditandoId((actual) => (actual === fila.id ? null : actual));
       return;
     }
     setGuardandoId(fila.id);
@@ -229,6 +239,7 @@ export default function BancosCobranzasMovimientos() {
         const { [fila.id]: _omit, ...resto } = prev;
         return resto;
       });
+      setEditandoId((actual) => (actual === fila.id ? null : actual));
       await consultar();
     } catch (err) {
       setError(err.message);
@@ -458,20 +469,27 @@ export default function BancosCobranzasMovimientos() {
                   <td className="px-4 py-2">{fila.observaciones}</td>
                   <td className="px-4 py-2 text-xs text-gray-600">{fila.estadoBanco}</td>
                   <td className="px-4 py-2">
-                    {fila.pendiente ? (
+                    {fila.pendiente || editandoId === fila.id ? (
                       <div className="flex flex-col gap-1">
-                        <span
-                          className={`inline-block w-fit rounded px-2 py-0.5 text-xs font-semibold border ${
-                            fila.estadoMatch === "varios"
-                              ? "bg-amber-50 text-amber-700 border-amber-200"
-                              : "bg-red-50 text-red-700 border-red-200"
-                          }`}
-                        >
-                          {fila.estadoMatch === "varios" ? `VARIOS: ${fila.candidatosAmbiguos}` : "NO ENCONTRADO"}
-                        </span>
+                        {fila.pendiente && (
+                          <span
+                            className={`inline-block w-fit rounded px-2 py-0.5 text-xs font-semibold border ${
+                              fila.estadoMatch === "varios"
+                                ? "bg-amber-50 text-amber-700 border-amber-200"
+                                : "bg-red-50 text-red-700 border-red-200"
+                            }`}
+                          >
+                            {fila.estadoMatch === "varios" ? `VARIOS: ${fila.candidatosAmbiguos}` : "NO ENCONTRADO"}
+                          </span>
+                        )}
                         <input
                           type="text"
-                          value={borrador[fila.id] !== undefined ? borrador[fila.id] : fila.custnmbrManual || ""}
+                          autoFocus={editandoId === fila.id}
+                          value={
+                            borrador[fila.id] !== undefined
+                              ? borrador[fila.id]
+                              : fila.custnmbrManual || fila.custnmbrCalculado || ""
+                          }
                           onChange={(e) => setBorrador((prev) => ({ ...prev, [fila.id]: e.target.value }))}
                           onBlur={() => guardarNumeroManual(fila)}
                           onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
@@ -482,7 +500,13 @@ export default function BancosCobranzasMovimientos() {
                         />
                       </div>
                     ) : (
-                      <BadgeResuelto fila={fila} />
+                      <BadgeResuelto
+                        fila={fila}
+                        onEditar={() => {
+                          setBorrador((prev) => ({ ...prev, [fila.id]: fila.custnmbrManual || fila.custnmbrCalculado || "" }));
+                          setEditandoId(fila.id);
+                        }}
+                      />
                     )}
                   </td>
                   <td className="px-4 py-2 text-center">

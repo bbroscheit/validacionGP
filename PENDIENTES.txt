@@ -1773,4 +1773,28 @@ Bancos Cobranzas: boton "Descargar Excel" en Movimientos (2026-10-23)
   Nombre de archivo incluye banco y rango de fechas.
 - Verificado: build de Next.js OK, logica de "Número de cliente" (manual pisa a
   identificado/varios/no_encontrado) probada con casos sueltos.
+- Commit/push hecho (cdbcd94).
+
+Bancos Cobranzas: poder editar un número de cliente ya resuelto (2026-10-23)
+- Pedido del usuario: una vez que una fila queda resuelta (identificada sola por el
+  sistema, o cargada a mano), no había forma de corregirla - el input desaparecía y
+  quedaba una tarjeta fija. Si el usuario se equivocaba al tipear, o el sistema matcheaba
+  mal, no se podía arreglar.
+- Solo cambio de cliente, el endpoint `PUT /bancos-cobranzas/movimientos/:id/numero-cliente`
+  (ya existía y ya soporta sobrescribir/borrar un custnmbrManual) no cambió.
+- client/pages/bancos-cobranzas/movimientos.js: `BadgeResuelto` suma un link "editar" que
+  reabre el mismo input que ya existía para las filas pendientes (estado `editandoId`),
+  precargado con el valor actual (manual si hay, si no el identificado automático). Guardar
+  (blur/Enter) cierra el modo edición. Borrar el campo y guardar vuelve a lo que el sistema
+  calculó solo (o a pendiente si no hay match), usando la misma lógica que ya tenía
+  `actualizarNumeroManual` para "valor vacío = null".
+- Fix de paso en `guardarNumeroManual`: la comparación de "sin cambios" (para no pegarle al
+  servidor si no se tocó nada) comparaba solo contra `custnmbrManual` - al agregar "editar"
+  sobre filas ya identificadas automáticamente (sin manual todavía), abrir y cerrar sin
+  tocar nada hubiera generado una asignación manual de la nada. Ahora compara contra lo que
+  el input realmente mostraba (manual, o si no hay, el calculado).
+- Verificado con VPN activa: una fila identificada automáticamente (CUIT real -> cliente
+  "1") se pudo corregir a mano, la corrección persiste en un GET posterior, y borrarla
+  vuelve exactamente al identificado automático original (sin quedar pendiente). Build de
+  Next.js OK. Datos de prueba borrados de Postgres al terminar.
 - TODAVIA NO SE HIZO COMMIT/PUSH - queda pendiente que el usuario lo pida explicitamente.
