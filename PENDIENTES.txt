@@ -1701,4 +1701,76 @@ Bancos Cobranzas: el excel real seguia fallando - celdas tipadas, no texto (2026
   de TEXTO viejo (D/M/AAAA, "D M AAAA", importe con "$") para confirmar que sigue
   funcionando igual que antes (sin regresion). Build de Next.js OK. Datos de prueba
   borrados de Postgres al terminar.
+- Commit/push hecho (ff79360).
+
+Bancos Cobranzas: columna/filtro de "Recibo en GP" por movimiento (2026-10-23)
+- Pedido del usuario: ellos cargan, linea por linea, un recibo en GP por cada movimiento
+  bancario identificado - necesitan una columna con checkbox para marcar cuales ya tienen
+  su recibo creado y cuales no, que persista, y un filtro nuevo (aparte del de "sin
+  identificar") para filtrar por ese estado.
+- api/src/models/MovimientoBanco.js: 3 columnas nuevas, mismo criterio que
+  custnmbrManual/usuarioManual/fechaManual - `reciboCreado` (boolean, default false),
+  `usuarioRecibo`, `fechaRecibo`. Un re-upload del mismo excel nunca las toca (confirmado,
+  ver verificacion).
+- Descubrimiento operativo: esta es la PRIMERA vez que el proyecto necesita agregarle una
+  columna a una tabla de Postgres que ya existia con datos reales. `sequelize.sync()` sin
+  opciones (lo que ya tenia api/index.js) solo CREA tablas que no existen, no les agrega
+  columnas a las que ya existen - confirmado el error exacto ("no existe la columna
+  «reciboCreado»") antes de darse cuenta. Como el proyecto no tiene herramienta de
+  migraciones (confirmado de nuevo), se cambio `index.js` a `sequelize.sync({ alter: true
+  })` para que esto (y cualquier columna nueva futura) se aplique solo al reiniciar la
+  api - esto es un cambio de comportamiento para TODOS los modelos, no solo
+  MovimientoBanco, pero es justamente para lo que sirve `alter: true` y es la forma
+  estandar de Sequelize de evolucionar el esquema sin una herramienta de migraciones
+  aparte.
+- api/src/services/movimientosBanco.js: `actualizarReciboCreado({ id, reciboCreado,
+  usuario })` (mismo patron que actualizarNumeroManual); `listarMovimientos` suma el
+  parametro `filtroRecibo` ('si' | 'no' | '' = todos).
+- Ruta nueva `PUT /bancos-cobranzas/movimientos/:id/recibo` (mismo soloEcobahia que las
+  demas). `GET /bancos-cobranzas/:banco/movimientos` suma el query param `filtroRecibo`.
+- client/pages/bancos-cobranzas/movimientos.js: columna nueva "Recibo en GP" con checkbox
+  (se guarda solo al tildar/destildar, sin boton aparte - mismo criterio instantaneo que
+  el input de numero de cliente) y un select "Recibo en GP" (Todos/Con recibo creado/Sin
+  recibo creado) al lado del checkbox "Mostrar solo sin identificar".
+- Verificado con VPN activa: alta de filas, tildar/destildar el recibo (guarda y limpia
+  usuario/fecha correctamente), los 2 filtros (con/sin recibo) devuelven exactamente lo
+  esperado, y un re-upload del mismo excel NO pisa un recibo ya tildado. Probado tambien
+  HTTP end to end (POST subida, PUT recibo, GET con cada filtro). Build de Next.js OK.
+  Datos de prueba borrados de Postgres al terminar.
+- TODAVIA NO SE HIZO COMMIT/PUSH - queda pendiente que el usuario lo pida explicitamente.
+
+Bancos Cobranzas: filtro por sucursal (columna Estado) en Movimientos (2026-10-23)
+- Pedido del usuario: un desplegable para filtrar por sucursal (ver todas, o una en
+  particular) en la columna "Estado". Esa columna, en la practica, no es un estado de la
+  transaccion - es el codigo de sucursal del banco (confirmado con datos reales: MADRYN,
+  MDQ, CENTRAL, LA PAMPA).
+- api/src/services/movimientosBanco.js: `listarMovimientos` suma `sucursal` (filtra por
+  `estadoBanco` exacto) y devuelve `sucursalesDisponibles` (valores distintos de
+  estadoBanco en el rango de fechas completo, antes de aplicar busqueda/soloFaltantes/
+  filtroRecibo/sucursal, para que el desplegable no cambie de opciones solo porque se tocó
+  otro filtro).
+- Ruta GET suma el query param `sucursal`.
+- client/pages/bancos-cobranzas/movimientos.js: desplegable "Sucursal (columna Estado)" en
+  la barra de filtros (mismo lugar que los otros filtros, no embebido en el header de la
+  tabla), poblado con `data.sucursalesDisponibles`; se resetea solo al cambiar de pestaña
+  de banco (las sucursales son distintas por banco).
+- Verificado con VPN activa: sucursalesDisponibles sale ordenado y sin valores vacios,
+  filtrar por una sucursal trae solo esas filas, y las opciones del desplegable no cambian
+  al filtrar por una sola. Build de Next.js OK. Datos de prueba borrados de Postgres al
+  terminar.
+- TODAVIA NO SE HIZO COMMIT/PUSH - queda pendiente que el usuario lo pida explicitamente.
+
+Bancos Cobranzas: boton "Descargar Excel" en Movimientos (2026-10-23)
+- Pedido del usuario: que el resultado filtrado (incluyendo el filtro de sucursal nuevo)
+  se pueda exportar a excel con la misma info que se ve en pantalla.
+- client/pages/bancos-cobranzas/movimientos.js: boton nuevo junto al resumen de conteos,
+  usa `exportToExcel` (client/functions/exportToExcel.js, ya existente, mismo patron que
+  cuenta-corriente.js) sobre `data.filas` tal cual vino del servidor - como ese array ya
+  viene filtrado por banco/fechas/busqueda/sin identificar/recibo/sucursal, el excel
+  siempre refleja exactamente lo que se ve en pantalla en ese momento. Columnas: Fecha,
+  Concepto, Importe, Observaciones, Estado, Número de cliente (mismo criterio que la
+  pantalla: manual > identificado > "VARIOS: ..." > "NO ENCONTRADO"), Recibo en GP (Sí/No).
+  Nombre de archivo incluye banco y rango de fechas.
+- Verificado: build de Next.js OK, logica de "Número de cliente" (manual pisa a
+  identificado/varios/no_encontrado) probada con casos sueltos.
 - TODAVIA NO SE HIZO COMMIT/PUSH - queda pendiente que el usuario lo pida explicitamente.

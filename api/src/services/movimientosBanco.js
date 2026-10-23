@@ -204,7 +204,7 @@ const aPlano = (fila) => ({
   pendiente: fila.estadoMatch !== 'identificado' && !fila.custnmbrManual,
 });
 
-const listarMovimientos = async ({ banco, desde, hasta, busqueda = '', soloFaltantes = false }) => {
+const listarMovimientos = async ({ banco, desde, hasta, busqueda = '', soloFaltantes = false, filtroRecibo = '', sucursal = '' }) => {
   if (!banco || !desde || !hasta) {
     throw new Error('banco, desde y hasta son requeridos');
   }
@@ -219,6 +219,14 @@ const listarMovimientos = async ({ banco, desde, hasta, busqueda = '', soloFalta
   const conPendiente = filas.map(aPlano);
   const totalFaltantes = conPendiente.filter((f) => f.pendiente).length;
 
+  // La columna ESTADO del excel del banco, en la práctica, identifica la sucursal del
+  // movimiento (ej. "MADRYN", "MDQ", "CENTRAL", "LA PAMPA"), no un estado de la
+  // transacción - de ahí el desplegable para filtrar por sucursal en esa misma columna.
+  // Se calcula sobre el rango de fechas completo (antes de aplicar busqueda/soloFaltantes/
+  // filtroRecibo/sucursal), así las opciones del desplegable no cambian solo porque se
+  // tocó otro filtro.
+  const sucursalesDisponibles = [...new Set(conPendiente.map((f) => f.estadoBanco).filter(Boolean))].sort();
+
   const busquedaNorm = String(busqueda || '').trim().toLowerCase();
   const soloFaltantesBool = soloFaltantes === true || soloFaltantes === 'true';
 
@@ -228,13 +236,16 @@ const listarMovimientos = async ({ banco, desde, hasta, busqueda = '', soloFalta
       .join(' ')
       .toLowerCase()
       .includes(busquedaNorm))
-    .filter((f) => !soloFaltantesBool || f.pendiente);
+    .filter((f) => !soloFaltantesBool || f.pendiente)
+    .filter((f) => !filtroRecibo || (filtroRecibo === 'si' ? f.reciboCreado : !f.reciboCreado))
+    .filter((f) => !sucursal || f.estadoBanco === sucursal);
 
   return {
     filas: filtradas,
     totalFilas: filtradas.length,
     totalFaltantes,
     truncated: filas.length >= MAX_ROWS,
+    sucursalesDisponibles,
   };
 };
 
@@ -252,4 +263,17 @@ const actualizarNumeroManual = async ({ id, custnmbrManual, usuario }) => {
   return aPlano(movimiento.get({ plain: true }));
 };
 
-module.exports = { subirMovimientos, listarMovimientos, actualizarNumeroManual };
+const actualizarReciboCreado = async ({ id, reciboCreado, usuario }) => {
+  const movimiento = await MovimientoBanco.findByPk(id);
+  if (!movimiento) {
+    throw new Error('Movimiento no encontrado');
+  }
+  await movimiento.update({
+    reciboCreado: !!reciboCreado,
+    usuarioRecibo: reciboCreado ? usuario : null,
+    fechaRecibo: reciboCreado ? new Date() : null,
+  });
+  return aPlano(movimiento.get({ plain: true }));
+};
+
+module.exports = { subirMovimientos, listarMovimientos, actualizarNumeroManual, actualizarReciboCreado };

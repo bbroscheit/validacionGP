@@ -21,7 +21,7 @@ const getCobranzasSist2 = require('./controllers/getCobranzasSist2.js');
 const getClientesSist2 = require('./controllers/getClientesSist2.js');
 const getCuentaCorrienteSist2 = require('./controllers/getCuentaCorrienteSist2.js');
 const { putOverrideClasificacion, deleteOverrideClasificacion } = require('./controllers/overridesClasificacion.js');
-const { subirMovimientos, listarMovimientos, actualizarNumeroManual } = require('../services/movimientosBanco.js');
+const { subirMovimientos, listarMovimientos, actualizarNumeroManual, actualizarReciboCreado } = require('../services/movimientosBanco.js');
 const bloquearSiRestringido = require('../middlewares/bloquearSiRestringido.js');
 const soloEcobahia = require('../middlewares/soloEcobahia.js');
 
@@ -353,8 +353,8 @@ validacionRouter.post('/bancos-cobranzas/:banco/movimientos', soloEcobahia, asyn
 validacionRouter.get('/bancos-cobranzas/:banco/movimientos', soloEcobahia, async (req, res) => {
   try {
     const { banco } = req.params;
-    const { desde, hasta, busqueda, soloFaltantes } = req.query;
-    const data = await listarMovimientos({ banco, desde, hasta, busqueda, soloFaltantes });
+    const { desde, hasta, busqueda, soloFaltantes, filtroRecibo, sucursal } = req.query;
+    const data = await listarMovimientos({ banco, desde, hasta, busqueda, soloFaltantes, filtroRecibo, sucursal });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en GET /bancos-cobranzas/:banco/movimientos', e.message);
@@ -370,6 +370,20 @@ validacionRouter.put('/bancos-cobranzas/movimientos/:id/numero-cliente', soloEco
     res.status(200).json(data);
   } catch (e) {
     console.log('error en PUT /bancos-cobranzas/movimientos/:id/numero-cliente', e.message);
+    res.status(500).json({ state: 'error', message: e.message });
+  }
+});
+
+// Marca, por movimiento, si ya se le creo el recibo en GP - el usuario lo carga a mano
+// linea por linea (ver services/movimientosBanco.js).
+validacionRouter.put('/bancos-cobranzas/movimientos/:id/recibo', soloEcobahia, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reciboCreado } = req.body;
+    const data = await actualizarReciboCreado({ id, reciboCreado, usuario: req.usuario?.usuario });
+    res.status(200).json(data);
+  } catch (e) {
+    console.log('error en PUT /bancos-cobranzas/movimientos/:id/recibo', e.message);
     res.status(500).json({ state: 'error', message: e.message });
   }
 });

@@ -12,6 +12,11 @@ const { sequelize } = require('../bd.js');
 // cuando GP no pudo identificar el cliente solo (estadoMatch 'no_encontrado'/'varios') -
 // un re-upload nunca los pisa, solo refresca los campos calculados
 // (estadoMatch/custnmbrCalculado/candidatosAmbiguos/estadoBanco).
+//
+// `reciboCreado`/`usuarioRecibo`/`fechaRecibo`: el usuario carga, línea por línea, un
+// recibo en GP por cada movimiento bancario identificado - esto marca cuáles ya tienen su
+// recibo creado y cuáles todavía no, para no tener que recordarlo a mano. Mismo criterio
+// que custnmbrManual: un re-upload no lo toca.
 const MovimientoBanco = sequelize.define('MovimientoBanco', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
   banco: { type: DataTypes.STRING(20), allowNull: false },
@@ -26,6 +31,9 @@ const MovimientoBanco = sequelize.define('MovimientoBanco', {
   custnmbrManual: { type: DataTypes.STRING(20), allowNull: true },
   usuarioManual: { type: DataTypes.STRING(150), allowNull: true },
   fechaManual: { type: DataTypes.DATE, allowNull: true },
+  reciboCreado: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  usuarioRecibo: { type: DataTypes.STRING(150), allowNull: true },
+  fechaRecibo: { type: DataTypes.DATE, allowNull: true },
   claveFila: { type: DataTypes.STRING(32), allowNull: false },
 }, {
   tableName: 'movimientos_banco',
