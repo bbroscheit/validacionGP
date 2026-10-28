@@ -29,6 +29,7 @@ const menus = [
       { href: "/reportes/ventas-por-sucursal-cuenta", label: "Ventas por sucursal y cuenta" },
       { href: "/reportes/asiento-ventas", label: "Asiento de ventas" },
       { href: "/reportes/ventas-categoria-contribuyente", label: "Ventas por categoría y contribuyente" },
+      { href: "/reportes/cuenta-corriente-cliente", label: "Cuenta corriente de cliente" },
     ],
   },
   {
@@ -38,6 +39,7 @@ const menus = [
       { href: "/reportes/compras-por-sucursal-cuenta", label: "Compras por sucursal y cuenta" },
       { href: "/reportes/asiento-compras", label: "Asiento de compras" },
       { href: "/reportes/compras-categoria-contribuyente", label: "Compras por categoría y contribuyente" },
+      { href: "/reportes/cuenta-corriente-proveedor", label: "Cuenta corriente de proveedor" },
     ],
   },
   {

@@ -20,6 +20,10 @@ const getLibroIvaDigitalExport = require('./controllers/getLibroIvaDigitalExport
 const getCobranzasSist2 = require('./controllers/getCobranzasSist2.js');
 const getClientesSist2 = require('./controllers/getClientesSist2.js');
 const getCuentaCorrienteSist2 = require('./controllers/getCuentaCorrienteSist2.js');
+const getClientesVentas = require('./controllers/getClientesVentas.js');
+const getCuentaCorrienteCliente = require('./controllers/getCuentaCorrienteCliente.js');
+const getProveedoresCompras = require('./controllers/getProveedoresCompras.js');
+const getCuentaCorrienteProveedor = require('./controllers/getCuentaCorrienteProveedor.js');
 const { putOverrideClasificacion, deleteOverrideClasificacion } = require('./controllers/overridesClasificacion.js');
 const { subirMovimientos, listarMovimientos, actualizarNumeroManual, actualizarReciboCreado } = require('../services/movimientosBanco.js');
 const bloquearSiRestringido = require('../middlewares/bloquearSiRestringido.js');
@@ -293,6 +297,63 @@ validacionRouter.get('/reportes/sist2/cuenta-corriente', soloEcobahia, async (re
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/sist2/cuenta-corriente', e.message);
+    res.status(500).json({ state: 'error', message: e.message });
+  }
+});
+
+// Búsqueda de clientes (Ecobahia / "sistema 1") para el selector de Cuenta Corriente de
+// Cliente (menú "Ventas").
+validacionRouter.get('/reportes/clientes', async (req, res) => {
+  try {
+    const { q } = req.query;
+    const data = await getClientesVentas({ q });
+    res.status(200).json(data);
+  } catch (e) {
+    console.log('error en /reportes/clientes', e.message);
+    res.status(500).json({ state: 'error', message: e.message });
+  }
+});
+
+// Reporte - Cuenta corriente de cliente (Ecobahia / "sistema 1"): historial completo
+// (RM20101) con saldo inicial arrastrado + movimientos del período con saldo corrido.
+// Soporta filtro de sucursal (PHONE3, ver getCuentaCorrienteCliente.js) - no se bloquea
+// para usuarios restringidos, se les fuerza su sucursal igual que el resto de los
+// reportes de Ventas.
+validacionRouter.get('/reportes/cuenta-corriente-cliente', async (req, res) => {
+  try {
+    const { cliente, fechaDesde, fechaHasta, sucursal, pendientes } = req.query;
+    const data = await getCuentaCorrienteCliente({ cliente, fechaDesde, fechaHasta, sucursal, pendientes, sucursalRestringida: req.sucursalRestringida });
+    res.status(200).json(data);
+  } catch (e) {
+    console.log('error en /reportes/cuenta-corriente-cliente', e.message);
+    res.status(500).json({ state: 'error', message: e.message });
+  }
+});
+
+// Búsqueda de proveedores (Ecobahia) para el selector de Cuenta Corriente de Proveedor
+// (menú "Compras").
+validacionRouter.get('/reportes/proveedores', async (req, res) => {
+  try {
+    const { q } = req.query;
+    const data = await getProveedoresCompras({ q });
+    res.status(200).json(data);
+  } catch (e) {
+    console.log('error en /reportes/proveedores', e.message);
+    res.status(500).json({ state: 'error', message: e.message });
+  }
+});
+
+// Reporte - Cuenta corriente de proveedor (Ecobahia): historial completo (PM20000 +
+// PM30200 unidos) con saldo inicial arrastrado + movimientos del período con saldo
+// corrido. Sin filtro de sucursal (ver getCuentaCorrienteProveedor.js) - bloqueado entero
+// para usuarios restringidos por sucursal, no hay forma segura de acotarlo.
+validacionRouter.get('/reportes/cuenta-corriente-proveedor', bloquearSiRestringido, async (req, res) => {
+  try {
+    const { proveedor, fechaDesde, fechaHasta, pendientes } = req.query;
+    const data = await getCuentaCorrienteProveedor({ proveedor, fechaDesde, fechaHasta, pendientes });
+    res.status(200).json(data);
+  } catch (e) {
+    console.log('error en /reportes/cuenta-corriente-proveedor', e.message);
     res.status(500).json({ state: 'error', message: e.message });
   }
 });
