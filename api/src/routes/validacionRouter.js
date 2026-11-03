@@ -301,12 +301,12 @@ validacionRouter.get('/reportes/sist2/cuenta-corriente', soloEcobahia, async (re
   }
 });
 
-// Búsqueda de clientes (Ecobahia / "sistema 1") para el selector de Cuenta Corriente de
+// Búsqueda de clientes (los 4 emprendimientos) para el selector de Cuenta Corriente de
 // Cliente (menú "Ventas").
 validacionRouter.get('/reportes/clientes', async (req, res) => {
   try {
     const { q } = req.query;
-    const data = await getClientesVentas({ q });
+    const data = await getClientesVentas({ q, empresa: resolverEmpresa(req) });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/clientes', e.message);
@@ -314,7 +314,7 @@ validacionRouter.get('/reportes/clientes', async (req, res) => {
   }
 });
 
-// Reporte - Cuenta corriente de cliente (Ecobahia / "sistema 1"): historial completo
+// Reporte - Cuenta corriente de cliente (los 4 emprendimientos): historial completo
 // (RM20101) con saldo inicial arrastrado + movimientos del período con saldo corrido.
 // Soporta filtro de sucursal (PHONE3, ver getCuentaCorrienteCliente.js) - no se bloquea
 // para usuarios restringidos, se les fuerza su sucursal igual que el resto de los
@@ -322,7 +322,9 @@ validacionRouter.get('/reportes/clientes', async (req, res) => {
 validacionRouter.get('/reportes/cuenta-corriente-cliente', async (req, res) => {
   try {
     const { cliente, fechaDesde, fechaHasta, sucursal, pendientes } = req.query;
-    const data = await getCuentaCorrienteCliente({ cliente, fechaDesde, fechaHasta, sucursal, pendientes, sucursalRestringida: req.sucursalRestringida });
+    const data = await getCuentaCorrienteCliente({
+      cliente, fechaDesde, fechaHasta, sucursal, pendientes, empresa: resolverEmpresa(req), sucursalRestringida: req.sucursalRestringida,
+    });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/cuenta-corriente-cliente', e.message);
@@ -330,12 +332,12 @@ validacionRouter.get('/reportes/cuenta-corriente-cliente', async (req, res) => {
   }
 });
 
-// Búsqueda de proveedores (Ecobahia) para el selector de Cuenta Corriente de Proveedor
-// (menú "Compras").
+// Búsqueda de proveedores (los 4 emprendimientos) para el selector de Cuenta Corriente de
+// Proveedor (menú "Compras").
 validacionRouter.get('/reportes/proveedores', async (req, res) => {
   try {
     const { q } = req.query;
-    const data = await getProveedoresCompras({ q });
+    const data = await getProveedoresCompras({ q, empresa: resolverEmpresa(req) });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/proveedores', e.message);
@@ -343,14 +345,18 @@ validacionRouter.get('/reportes/proveedores', async (req, res) => {
   }
 });
 
-// Reporte - Cuenta corriente de proveedor (Ecobahia): historial completo (PM20000 +
-// PM30200 unidos) con saldo inicial arrastrado + movimientos del período con saldo
-// corrido. Sin filtro de sucursal (ver getCuentaCorrienteProveedor.js) - bloqueado entero
-// para usuarios restringidos por sucursal, no hay forma segura de acotarlo.
-validacionRouter.get('/reportes/cuenta-corriente-proveedor', bloquearSiRestringido, async (req, res) => {
+// Reporte - Cuenta corriente de proveedor (los 4 emprendimientos): historial completo
+// (PM20000 + PM30200 unidos) con saldo inicial arrastrado + movimientos del período con
+// saldo corrido. Sin filtro de sucursal: a diferencia de Ventas, un comprobante de compra
+// no tiene una sucursal confiable asociada (no hay equivalente a PHONE3 para proveedores),
+// así que no existe forma de saber qué parte de la cuenta corriente de un proveedor le
+// corresponde a cada sucursal - se habilita completo para todos los usuarios, restringidos
+// o no, en vez de bloquearlo (decisión del usuario: "es imposible saber de que sucursal
+// es cada proveedor").
+validacionRouter.get('/reportes/cuenta-corriente-proveedor', async (req, res) => {
   try {
     const { proveedor, fechaDesde, fechaHasta, pendientes } = req.query;
-    const data = await getCuentaCorrienteProveedor({ proveedor, fechaDesde, fechaHasta, pendientes });
+    const data = await getCuentaCorrienteProveedor({ proveedor, fechaDesde, fechaHasta, pendientes, empresa: resolverEmpresa(req) });
     res.status(200).json(data);
   } catch (e) {
     console.log('error en /reportes/cuenta-corriente-proveedor', e.message);

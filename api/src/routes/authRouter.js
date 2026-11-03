@@ -14,17 +14,16 @@ const opcionesCookie = {
 };
 
 // Campos derivados que van en toda respuesta que expone la sesión (/login, /me): además
-// del emprendimiento efectivo, si el usuario es de Gerencia (services/autorizacion.js) se
-// le manda también la lista de emprendimientos entre los que puede elegir - así el cliente
-// nunca necesita su propia copia hardcodeada (ver client/pages/elegir-emprendimiento.js).
-const datosDerivadosSesion = (datosUsuario) => {
-  const gerencia = esGerencia(datosUsuario);
-  return {
-    emprendimiento: emprendimientoDeSesion(datosUsuario),
-    esGerencia: gerencia,
-    ...(gerencia ? { emprendimientosDisponibles: EMPRENDIMIENTOS_DISPONIBLES } : {}),
-  };
-};
+// del emprendimiento efectivo, la lista completa de emprendimientos (value + label) - la
+// usa tanto el selector de Gerencia (client/pages/elegir-emprendimiento.js) como cualquier
+// pantalla que necesite mostrar el nombre legible del emprendimiento de la sesión actual
+// (ej. el título del home, client/pages/index.js) - así el cliente nunca necesita su
+// propia copia hardcodeada de esos nombres.
+const datosDerivadosSesion = (datosUsuario) => ({
+  emprendimiento: emprendimientoDeSesion(datosUsuario),
+  esGerencia: esGerencia(datosUsuario),
+  emprendimientosDisponibles: EMPRENDIMIENTOS_DISPONIBLES,
+});
 
 authRouter.post('/login', async (req, res) => {
   try {

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/functions/apiFetch";
+import { useSesion } from "@/context/SesionContext";
 
 function formatMonto(n) {
   return (n ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -13,6 +14,7 @@ function formatFecha(iso) {
 const PROVEEDORES_POR_PAGINA = 10;
 
 export default function CuentaCorrienteProveedor() {
+  const sesion = useSesion();
   const [busqueda, setBusqueda] = useState("");
   const [opciones, setOpciones] = useState([]);
   const [buscandoProveedor, setBuscandoProveedor] = useState(false);
@@ -109,7 +111,7 @@ export default function CuentaCorrienteProveedor() {
           { name: "Base", rows: base, columns: COLUMNAS_CC_EXCEL },
           { name: "CC Proveedores", rows: armarFilasCuentaCorriente(data.proveedores), columns: COLUMNAS_CC_EXCEL },
         ],
-        "cuenta-corriente-proveedores-ecobahia"
+        `cuenta-corriente-proveedores-${sesion?.emprendimiento || "ecobahia"}`
       );
     } catch (err) {
       setError(err.message);

@@ -1,11 +1,15 @@
-const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, sql } = require('../../config/gpPool');
 
-// Búsqueda de clientes (Ecobahia) para el selector de Cuenta Corriente de Cliente -
-// mismo patrón que getClientesSist2.js. Busca por código o por nombre.
-const getClientesVentas = async ({ q }) => {
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa };
+
+// Búsqueda de clientes (los 4 emprendimientos) para el selector de Cuenta Corriente de
+// Cliente - mismo patrón que getClientesSist2.js. Busca por código o por nombre.
+const getClientesVentas = async ({ q, empresa = 'ecobahia' }) => {
   if (!q || q.trim().length < 2) return [];
 
-  const pool = await getGpPoolEcobahia();
+  const getPool = POOLS[empresa];
+  if (!getPool) throw new Error(`Empresa desconocida: "${empresa}"`);
+  const pool = await getPool();
   const request = pool.request();
   request.input('q', sql.VarChar(100), `%${q.trim()}%`);
   const result = await request.query(`

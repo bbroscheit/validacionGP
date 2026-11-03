@@ -1,6 +1,8 @@
-const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, sql } = require('../../config/gpPool');
 
-// Reporte - Cuenta corriente de proveedor (Ecobahia / "sistema 1", menú "Compras").
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa };
+
+// Reporte - Cuenta corriente de proveedor (los 4 emprendimientos, menú "Compras").
 // A diferencia de Clientes (RM20101 sola alcanza - ver getCuentaCorrienteCliente.js),
 // Proveedores SÍ separa los documentos abiertos (PM20000) de los ya pagados/históricos
 // (PM30200) - confirmado contra PRD08 real: las dos tienen datos reales (568 y 2163
@@ -102,8 +104,10 @@ const listadoProveedores = async (pool, desde, hasta, pendientes) => {
   };
 };
 
-const getCuentaCorrienteProveedor = async ({ proveedor, fechaDesde, fechaHasta, pendientes }) => {
-  const pool = await getGpPoolEcobahia();
+const getCuentaCorrienteProveedor = async ({ proveedor, fechaDesde, fechaHasta, pendientes, empresa = 'ecobahia' }) => {
+  const getPool = POOLS[empresa];
+  if (!getPool) throw new Error(`Empresa desconocida: "${empresa}"`);
+  const pool = await getPool();
   const desdeListado = fechaDesde ? new Date(fechaDesde) : null;
   const hastaListado = fechaHasta ? new Date(fechaHasta) : null;
   const pendientesBool = pendientes === true || pendientes === 'true';

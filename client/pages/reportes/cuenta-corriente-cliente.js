@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/functions/apiFetch";
+import { useSesion } from "@/context/SesionContext";
 
 function formatMonto(n) {
   return (n ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -13,6 +14,7 @@ function formatFecha(iso) {
 const CLIENTES_POR_PAGINA = 10;
 
 export default function CuentaCorrienteCliente() {
+  const sesion = useSesion();
   const [busqueda, setBusqueda] = useState("");
   const [opciones, setOpciones] = useState([]);
   const [buscandoCliente, setBuscandoCliente] = useState(false);
@@ -131,7 +133,7 @@ export default function CuentaCorrienteCliente() {
           { name: "CC Todos los Clientes", rows: armarFilasCuentaCorriente(clientesTodos), columns: COLUMNAS_CC_EXCEL },
           { name: "CC Clientes del Filtro", rows: armarFilasCuentaCorriente(data.clientes), columns: COLUMNAS_CC_EXCEL },
         ],
-        "cuenta-corriente-clientes-ecobahia"
+        `cuenta-corriente-clientes-${sesion?.emprendimiento || "ecobahia"}`
       );
     } catch (err) {
       setError(err.message);

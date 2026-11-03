@@ -31,7 +31,7 @@ const SIST2_DOCID_SUCURSAL = {
 const SIST2_TEXTO_SUCURSAL = {
   'BAHIA BLANCA': 'Bahía Blanca',
   'CASA CENTRAL': 'Casa Central',
-  TANDIL: 'Tandil',
+  'TANDIL': 'Tandil',
   'MAR DEL PLATA': 'Mar del Plata',
   'MAR DE PLATA': 'Mar del Plata',
   'LA PAMPA': 'La Pampa',

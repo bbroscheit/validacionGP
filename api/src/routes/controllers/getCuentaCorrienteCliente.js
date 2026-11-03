@@ -1,9 +1,11 @@
-const { getGpPoolEcobahia, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, sql } = require('../../config/gpPool');
 const { coincideSucursal } = require('../../services/autorizacion');
 const { getOverridesMap } = require('../../services/clasificacionOverrides');
 const getSucursalesVentas = require('./getSucursalesVentas.js');
 
-// Reporte - Cuenta corriente de cliente (Ecobahia / "sistema 1", menú "Ventas").
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa };
+
+// Reporte - Cuenta corriente de cliente (los 4 emprendimientos, menú "Ventas"). Mismo
 // Port de getCuentaCorrienteSist2.js, simplificado: acá PHONE3 solo ya alcanza para
 // resolver la sucursal de un comprobante (confirmado, mismo criterio que
 // getVentasPorSucursal.js) - no hace falta la cadena de fallback PHONE3->DOCID->USERDEF2
@@ -203,19 +205,24 @@ const listadoClientes = async (pool, desde, hasta, sucursalFiltro, pendientes, o
   };
 };
 
-const getCuentaCorrienteCliente = async ({ cliente, fechaDesde, fechaHasta, sucursal, pendientes, sucursalRestringida = null }) => {
-  const pool = await getGpPoolEcobahia();
-  const overridesMap = await getOverridesMap({ empresa: 'ecobahia', tipo: 'sucursal' });
+const getCuentaCorrienteCliente = async ({ cliente, fechaDesde, fechaHasta, sucursal, pendientes, empresa = 'ecobahia', sucursalRestringida = null }) => {
+  const getPool = POOLS[empresa];
+  if (!getPool) throw new Error(`Empresa desconocida: "${empresa}"`);
+  const pool = await getPool();
+  const overridesMap = await getOverridesMap({ empresa, tipo: 'sucursal' });
   const desdeListado = fechaDesde ? new Date(fechaDesde) : null;
   const hastaListado = fechaHasta ? new Date(fechaHasta) : null;
 
   // Acceso restringido por sucursal: se fuerza el filtro a la sucursal real del usuario
-  // (buscando cuál de las sucursales reales de Ecobahia coincide con su valor de AD, con
-  // el mismo helper que ya usa el resto de los reportes de Ventas) - ignorando lo que
-  // pida el cliente. Si ninguna coincide, se fuerza un valor que no matchea nada.
+  // (buscando cuál de las sucursales reales coincide con su valor de AD, con el mismo
+  // helper que ya usa el resto de los reportes de Ventas) - ignorando lo que pida el
+  // cliente. Si ninguna coincide, se fuerza un valor que no matchea nada. En la práctica
+  // hoy solo existen usuarios restringidos por sucursal dentro de Ecobahia (ver
+  // autorizacion.js), pero la lógica queda genérica por si algún otro emprendimiento suma
+  // una sucursal restringida más adelante.
   let sucursalFiltro = sucursal && sucursal.trim() ? sucursal.trim() : null;
   if (sucursalRestringida) {
-    const sucursalesReales = await getSucursalesVentas({ empresa: 'ecobahia' });
+    const sucursalesReales = await getSucursalesVentas({ empresa });
     sucursalFiltro = sucursalesReales.find((s) => coincideSucursal(s, sucursalRestringida)) || '__SIN_ACCESO__';
   }
   const pendientesBool = pendientes === true || pendientes === 'true';
