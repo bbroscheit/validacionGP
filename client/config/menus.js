@@ -33,7 +33,7 @@ export const menus = [
   {
     label: "Compras",
     links: [
-      { href: "/reportes/compras-por-sucursal", label: "Compras por sucursal", ocultoPara: ["cylius"] },
+      { href: "/reportes/compras-por-sucursal", label: "Compras por sucursal" },
       { href: "/reportes/compras-por-sucursal-cuenta", label: "Compras por sucursal y cuenta" },
       { href: "/reportes/asiento-compras", label: "Asiento de compras" },
       { href: "/reportes/compras-categoria-contribuyente", label: "Compras por categoría y contribuyente", ocultoPara: ["cylius", "chile"] },
@@ -74,11 +74,12 @@ export const menus = [
 // categoría de contribuyente AFIP (RI/MO/CF/EX) - en Cylius USERDEF2 viene 100% en blanco,
 // y en Chile la tabla AWLI40330 (de donde sale la categoría de contribuyente) directamente
 // no existe - confirmado contra PRD07 y PRD05 respectivamente.
-// "Compras por sucursal" está oculto solo para Cylius: necesita un mapeo de ACCATNUM
-// (Créditos Fiscales/Bancos) por empresa que ahí es ambiguo por el multi-moneda, y además
-// AATransactions (la dimensión de zona) está vacía en PRD07 - no hay sucursal real que
-// mostrar. BAEBSA (Chile) sí tiene zonas reales cargadas (Santiago, Coquimbo) y su propio
-// mapeo de cuentas confirmado, así que para Chile este reporte queda habilitado.
+// "Compras por sucursal" está habilitado para Cylius y Chile - en los dos casos
+// AATransactions (la dimensión de zona) no tiene datos reales para Ventas, pero el
+// mapeo de cuentas (Créditos Fiscales/contrapartida de pago) sí está confirmado para
+// ambos, así que el reporte funciona igual, solo que todo cae en un único grupo ("En
+// Blanco" en Cylius, Santiago/Coquimbo sí existen en Chile) - sirve igual para comparar
+// el total general contra el Libro IVA Compras.
 export const menusVisibles = (usuario) => {
   const esEcobahia = !usuario || usuario.emprendimiento === "ecobahia";
   return menus

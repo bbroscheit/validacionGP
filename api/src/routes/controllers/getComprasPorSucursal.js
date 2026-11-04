@@ -113,6 +113,22 @@ const CONFIG_EMPRESA = {
     accatnumImpuestos: 135,
     accatnumBancos: 100,
   },
+  // Cylius (Uruguay, PRD07): confirmado contra el asiento real de Compras (GL20000,
+  // SOURCDOC PMTRX/PMVVR), todo el histórico. Contrapartida de pago = "AV-PROVEEDORES
+  // VARIOS" (211101-01-000, categoría 31 "Cuentas por pagar" - 1182 filas, casi todo
+  // crédito: $28.97M vs $309K débito) - no hay una segunda cuenta de tarjeta/banco con
+  // movimiento real como en otras empresas. Créditos Fiscales = categoría 18 ("Otros
+  // Créditos Corrientes - Créditos Fiscales", cuentas "IVA-CRED.FISCAL 22%" y
+  // "IVA-CRED.FISCAL 10.5% Y9.50%", 1055 filas). La categoría 3 ("Disponibilidades -
+  // Bancos Moneda Nacional") no tiene movimiento real de Compras (3 filas, $48.555) - se
+  // deja igual por ser la categoría semánticamente correcta, mismo criterio que Chile. No
+  // hace falta separar por moneda (ver getVentasPorSucursal.js) - DEBITAMT/CRDTAMNT de
+  // GL20000 son siempre moneda funcional (UYU) por diseño de GP.
+  cylius: {
+    cuentasContrapartida: ['211101-01-000'],
+    accatnumImpuestos: 18,
+    accatnumBancos: 3,
+  },
 };
 const MAX_ROWS = 100000;
 

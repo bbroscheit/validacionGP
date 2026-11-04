@@ -100,7 +100,7 @@ export default function ComprasPorSucursal() {
     });
     const documentos = [...porComprobante.values()]
       .map((d) => ({ ...d, Total: d.Neto + d.Impuestos }))
-      .sort((a, b) => a.Comprobante.localeCompare(b.Comprobante));
+      .sort((a, b) => new Date(a.DOCDATE) - new Date(b.DOCDATE) || a.Comprobante.localeCompare(b.Comprobante));
     const total = documentos.reduce((acc, d) => acc + d.Total, 0);
     return { documentos, total };
   }, [modalSucursal, data]);
