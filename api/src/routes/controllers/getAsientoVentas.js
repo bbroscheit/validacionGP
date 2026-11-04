@@ -13,6 +13,13 @@ const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, 
 // filtrar por sucursal (PHONE3 en Ecobahia; en sist2, las 3 fuentes de
 // services/sist2Ventas.js).
 //
+// Cylius factura en UYU/USD, pero GL20000 (el Libro Mayor) solo existe en la moneda
+// funcional de la compañía (UYU) - es una regla general de GP, el GL nunca posta en
+// moneda original. Confirmado cruzando un comprobante real en USD (FVPA-00056444,
+// ORSUBTOT real = 1100 USD): el asiento en GL20000 tiene DEBITAMT/CRDTAMNT en UYU
+// (53.783,33 / 44.084,70), nada que se parezca al monto real en dólares - no hace falta
+// separar nada por moneda acá.
+//
 // sist2: el filtro de sucursal se resuelve en JS (no en SQL, porque la sucursal ahí sale
 // de resolverSucursalSist2 y no de una sola columna) - se trae todo y se filtra después.
 // También hace falta desambiguar el join a SOP30200 por G.ORTRXTYP = H.SOPTYPE: en sist2
@@ -29,7 +36,6 @@ const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, 
 // el resumen se calcula en JS a partir de ese mismo detalle, así el Excel de control
 // (pestaña "Base" + pestaña "Resultado") es una suma verificable línea por línea.
 const MAX_ROWS = 100000;
-const MONEDA_VACIA = 'En Blanco';
 
 const getAsientoVentas = async ({ fechaDesde, fechaHasta, sucursal, soloConP = true, empresa = 'ecobahia', sucursalRestringida = null }) => {
   if (!fechaDesde || !fechaHasta) {
@@ -41,15 +47,6 @@ const getAsientoVentas = async ({ fechaDesde, fechaHasta, sucursal, soloConP = t
   const pool = await getPool();
   const soloConPBool = soloConP === false || soloConP === 'false' ? false : true;
   const sucursalFiltro = sucursal ? sucursal.trim() : null;
-
-  // Cylius factura en UYU/USD sin tipo de cambio en la base, y confirmado contra PRD07
-  // que GL20000 queda en la moneda ORIGINAL del comprobante (no convertida) - un asiento
-  // de una factura en USD posta sus importes en USD tal cual, no en pesos uruguayos. Por
-  // eso acá también hay que separar el asiento por moneda (vía el mismo LEFT JOIN a
-  // SOP30200 que ya trae la sucursal) en vez de sumar Debe/Haber de las dos monedas
-  // juntas - cada moneda sigue cerrando Debe = Haber por separado.
-  const multiMoneda = empresa === 'cylius';
-  const monedaSelect = multiMoneda ? ', LTRIM(RTRIM(H.CURNCYID)) AS Moneda' : '';
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
@@ -90,7 +87,7 @@ const getAsientoVentas = async ({ fechaDesde, fechaHasta, sucursal, soloConP = t
         LTRIM(RTRIM(N.ACTNUMST)) AS Cuenta,
         LTRIM(RTRIM(A.ACTDESCR)) AS CuentaDescripcion,
         G.DEBITAMT,
-        G.CRDTAMNT${clienteSucursalSelect}${monedaSelect}
+        G.CRDTAMNT${clienteSucursalSelect}
       FROM GL20000 AS G
       INNER JOIN GL00105 AS N ON N.ACTINDX = G.ACTINDX
       INNER JOIN GL00100 AS A ON A.ACTINDX = G.ACTINDX
@@ -125,60 +122,43 @@ const getAsientoVentas = async ({ fechaDesde, fechaHasta, sucursal, soloConP = t
 
   const base = detalleVisible.map((row) => ({
     Comprobante: row.Comprobante,
-    ...(multiMoneda ? { Moneda: row.Moneda || MONEDA_VACIA } : {}),
     Cuenta: row.Cuenta,
     CuentaDescripcion: row.CuentaDescripcion,
     Debe: row.DEBITAMT || 0,
     Haber: row.CRDTAMNT || 0,
   }));
 
-  const claveDe = (row) => (multiMoneda ? `${row.Cuenta}__${row.Moneda}` : row.Cuenta);
-
   const agrupado = new Map();
   base.forEach((row) => {
-    const clave = claveDe(row);
-    if (!agrupado.has(clave)) {
-      agrupado.set(clave, { Cuenta: row.Cuenta, ...(multiMoneda ? { Moneda: row.Moneda } : {}), CuentaDescripcion: row.CuentaDescripcion, neto: 0 });
+    if (!agrupado.has(row.Cuenta)) {
+      agrupado.set(row.Cuenta, { Cuenta: row.Cuenta, CuentaDescripcion: row.CuentaDescripcion, neto: 0 });
     }
-    agrupado.get(clave).neto += row.Debe - row.Haber;
+    agrupado.get(row.Cuenta).neto += row.Debe - row.Haber;
   });
 
   const rows = [...agrupado.values()]
-    .sort((a, b) => a.Cuenta.localeCompare(b.Cuenta) || (multiMoneda ? a.Moneda.localeCompare(b.Moneda) : 0))
-    .map(({ Cuenta, Moneda, CuentaDescripcion, neto }) => ({
+    .sort((a, b) => a.Cuenta.localeCompare(b.Cuenta))
+    .map(({ Cuenta, CuentaDescripcion, neto }) => ({
       Cuenta,
-      ...(multiMoneda ? { Moneda } : {}),
       CuentaDescripcion,
       Debe: neto > 0 ? neto : 0,
       Haber: neto < 0 ? -neto : 0,
     }));
 
-  let totalDebe, totalHaber, diferencia, totalesPorMoneda;
-  if (multiMoneda) {
-    const porMoneda = new Map();
-    rows.forEach((row) => {
-      if (!porMoneda.has(row.Moneda)) porMoneda.set(row.Moneda, { Moneda: row.Moneda, totalDebe: 0, totalHaber: 0 });
-      const t = porMoneda.get(row.Moneda);
-      t.totalDebe += row.Debe;
-      t.totalHaber += row.Haber;
-    });
-    totalesPorMoneda = [...porMoneda.values()]
-      .map((t) => ({ ...t, diferencia: t.totalDebe - t.totalHaber }))
-      .sort((a, b) => a.Moneda.localeCompare(b.Moneda));
-  } else {
-    totalDebe = rows.reduce((acc, row) => acc + row.Debe, 0);
-    totalHaber = rows.reduce((acc, row) => acc + row.Haber, 0);
-    diferencia = totalDebe - totalHaber;
-  }
+  const totalDebe = rows.reduce((acc, row) => acc + row.Debe, 0);
+  const totalHaber = rows.reduce((acc, row) => acc + row.Haber, 0);
+  const diferencia = totalDebe - totalHaber;
 
   return {
     totalCount,
     truncated: totalCount > MAX_ROWS,
     base,
-    baseColumns: multiMoneda ? ['Comprobante', 'Moneda', 'Cuenta', 'CuentaDescripcion', 'Debe', 'Haber'] : ['Comprobante', 'Cuenta', 'CuentaDescripcion', 'Debe', 'Haber'],
+    baseColumns: ['Comprobante', 'Cuenta', 'CuentaDescripcion', 'Debe', 'Haber'],
     rows,
-    columns: multiMoneda ? ['Cuenta', 'Moneda', 'CuentaDescripcion', 'Debe', 'Haber'] : ['Cuenta', 'CuentaDescripcion', 'Debe', 'Haber'],
-    ...(multiMoneda ? { totalesPorMoneda } : { totalDebe, totalHaber, diferencia }),
+    columns: ['Cuenta', 'CuentaDescripcion', 'Debe', 'Haber'],
+    totalDebe,
+    totalHaber,
+    diferencia,
   };
 };
 

@@ -60,29 +60,12 @@ export default function VentasPorSucursalCuenta() {
     }
   };
 
-  // Cylius factura en UYU/USD sin tipo de cambio en la base - cuando el backend separa
-  // por moneda (columns incluye "Moneda"), se arma un pivot independiente por cada
-  // moneda en vez de uno solo que mezclaría los dos totales. Para el resto de los
-  // emprendimientos esto es exactamente lo mismo que antes (un solo grupo, moneda null).
-  const multiMoneda = !!data?.columns?.includes("Moneda");
-  const gruposPivot = useMemo(() => {
-    if (!data) return null;
-    if (!multiMoneda) return [{ moneda: null, pivot: pivotar(data.rows) }];
-    const monedas = [...new Set(data.rows.map((r) => r.Moneda))].sort();
-    return monedas.map((moneda) => ({ moneda, pivot: pivotar(data.rows.filter((r) => r.Moneda === moneda)) }));
-  }, [data, multiMoneda]);
-
-  const todasLasCuentas = useMemo(() => {
-    if (!gruposPivot) return [];
-    const set = new Set();
-    gruposPivot.forEach(({ pivot }) => pivot.cuentas.forEach((c) => set.add(c.Cuenta)));
-    return [...set];
-  }, [gruposPivot]);
+  const pivot = useMemo(() => (data ? pivotar(data.rows) : null), [data]);
 
   // Al traer datos nuevos, todas las cuentas arrancan tildadas (incluidas en el total).
   useEffect(() => {
-    if (todasLasCuentas.length) setIncluidas(new Set(todasLasCuentas));
-  }, [todasLasCuentas]);
+    if (pivot?.cuentas.length) setIncluidas(new Set(pivot.cuentas.map((c) => c.Cuenta)));
+  }, [pivot]);
 
   const toggleCuenta = (cuenta) => {
     setIncluidas((prev) => {
@@ -93,31 +76,26 @@ export default function VentasPorSucursalCuenta() {
     });
   };
 
-  const totalesPorGrupo = useMemo(() => {
-    if (!gruposPivot) return null;
-    return gruposPivot.map(({ moneda, pivot }) => {
-      const totalesPorSucursal = {};
-      pivot.sucursales.forEach((s) => { totalesPorSucursal[s] = 0; });
-      let totalGeneral = 0;
-      pivot.cuentas.forEach((cuenta) => {
-        if (!incluidas.has(cuenta.Cuenta)) return;
-        pivot.sucursales.forEach((s) => { totalesPorSucursal[s] += cuenta.porSucursal[s] || 0; });
-        totalGeneral += cuenta.total;
-      });
-      return { moneda, pivot, totalesPorSucursal, totalGeneral };
+  const totales = useMemo(() => {
+    if (!pivot) return null;
+    const totalesPorSucursal = {};
+    pivot.sucursales.forEach((s) => { totalesPorSucursal[s] = 0; });
+    let totalGeneral = 0;
+    pivot.cuentas.forEach((cuenta) => {
+      if (!incluidas.has(cuenta.Cuenta)) return;
+      pivot.sucursales.forEach((s) => { totalesPorSucursal[s] += cuenta.porSucursal[s] || 0; });
+      totalGeneral += cuenta.total;
     });
-  }, [gruposPivot, incluidas]);
+    return { totalesPorSucursal, totalGeneral };
+  }, [pivot, incluidas]);
 
   // Detalle de comprobantes que arman el saldo de una sucursal: mismo filtro de cuentas
   // tildadas que se usa en el total, para que la suma del modal cierre contra esa columna.
-  // Cuando hay separación por moneda, el modal queda atado a la moneda del botón que lo
-  // abrió - mezclar las dos monedas en el mismo detalle repetiría el problema de fondo.
   const documentosModal = useMemo(() => {
     if (!modalSucursal || !data) return null;
     const porComprobante = new Map();
     data.base.forEach((row) => {
-      if (row.Sucursal !== modalSucursal.sucursal) return;
-      if (multiMoneda && row.Moneda !== modalSucursal.moneda) return;
+      if (row.Sucursal !== modalSucursal) return;
       if (!incluidas.has(row.Cuenta)) return;
       if (!porComprobante.has(row.Comprobante)) {
         porComprobante.set(row.Comprobante, { Comprobante: row.Comprobante, Monto: 0 });
@@ -127,28 +105,17 @@ export default function VentasPorSucursalCuenta() {
     const documentos = [...porComprobante.values()].sort((a, b) => a.Comprobante.localeCompare(b.Comprobante));
     const total = documentos.reduce((acc, d) => acc + d.Monto, 0);
     return { documentos, total };
-  }, [modalSucursal, data, incluidas, multiMoneda]);
+  }, [modalSucursal, data, incluidas]);
 
   const descargarExcel = () => {
-    if (!totalesPorGrupo || !data) return;
-    const columns = multiMoneda
-      ? ["Moneda", "Cuenta", "CuentaDescripcion", "Incluida", "Sucursal", "Monto"]
-      : ["Cuenta", "CuentaDescripcion", "Incluida", ...(totalesPorGrupo[0]?.pivot.sucursales || []), "Total"];
-    const rows = multiMoneda
-      ? totalesPorGrupo.flatMap(({ moneda, pivot }) => pivot.cuentas.flatMap((cuenta) => pivot.sucursales.map((s) => ({
-          Moneda: moneda,
-          Cuenta: cuenta.Cuenta,
-          CuentaDescripcion: cuenta.CuentaDescripcion,
-          Incluida: incluidas.has(cuenta.Cuenta) ? "Si" : "No",
-          Sucursal: s,
-          Monto: cuenta.porSucursal[s] || 0,
-        }))))
-      : totalesPorGrupo[0].pivot.cuentas.map((cuenta) => {
-          const row = { Cuenta: cuenta.Cuenta, CuentaDescripcion: cuenta.CuentaDescripcion, Incluida: incluidas.has(cuenta.Cuenta) ? "Si" : "No" };
-          totalesPorGrupo[0].pivot.sucursales.forEach((s) => { row[s] = cuenta.porSucursal[s] || 0; });
-          row.Total = cuenta.total;
-          return row;
-        });
+    if (!pivot) return;
+    const columns = ["Cuenta", "CuentaDescripcion", "Incluida", ...pivot.sucursales, "Total"];
+    const rows = pivot.cuentas.map((cuenta) => {
+      const row = { Cuenta: cuenta.Cuenta, CuentaDescripcion: cuenta.CuentaDescripcion, Incluida: incluidas.has(cuenta.Cuenta) ? "Si" : "No" };
+      pivot.sucursales.forEach((s) => { row[s] = cuenta.porSucursal[s] || 0; });
+      row.Total = cuenta.total;
+      return row;
+    });
     exportToExcelMultiHoja(
       [
         { name: "Base", rows: data.base, columns: data.baseColumns },
@@ -193,17 +160,15 @@ export default function VentasPorSucursalCuenta() {
         </p>
       )}
 
-      {totalesPorGrupo && totalesPorGrupo.map(({ moneda, pivot, totalesPorSucursal, totalGeneral }, idx) => (
-        <div key={moneda ?? "unica"} className="border border-[var(--color-border)] rounded-lg overflow-hidden mb-4">
+      {pivot && totales && (
+        <div className="border border-[var(--color-border)] rounded-lg overflow-hidden mb-4">
           <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)] bg-gray-50">
             <h2 className="font-semibold">
-              {multiMoneda ? `Moneda: ${moneda} — ` : ""}Ventas por sucursal y cuenta ({pivot.cuentas.length} cuentas)
+              Ventas por sucursal y cuenta ({pivot.cuentas.length} cuentas)
             </h2>
-            {idx === 0 && (
-              <button onClick={descargarExcel} className="text-xs bg-green-700 text-white rounded px-3 py-1">
-                Descargar Excel
-              </button>
-            )}
+            <button onClick={descargarExcel} className="text-xs bg-green-700 text-white rounded px-3 py-1">
+              Descargar Excel
+            </button>
           </div>
 
           <div className="overflow-x-auto">
@@ -217,7 +182,7 @@ export default function VentasPorSucursalCuenta() {
                     <th key={s} className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)] whitespace-nowrap">
                       <button
                         type="button"
-                        onClick={() => setModalSucursal({ sucursal: s, moneda })}
+                        onClick={() => setModalSucursal(s)}
                         className="hover:underline hover:text-[var(--color-primary)]"
                         title="Ver los comprobantes que forman el saldo de esta sucursal"
                       >
@@ -259,16 +224,16 @@ export default function VentasPorSucursalCuenta() {
                   <td className="px-4 py-2 border-t-2 border-[var(--color-border)]" colSpan={3}>Total general</td>
                   {pivot.sucursales.map((s) => (
                     <td key={s} className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">
-                      {formatMonto(totalesPorSucursal[s])}
+                      {formatMonto(totales.totalesPorSucursal[s])}
                     </td>
                   ))}
-                  <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(totalGeneral)}</td>
+                  <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(totales.totalGeneral)}</td>
                 </tr>
               </tfoot>
             </table>
           </div>
         </div>
-      ))}
+      )}
 
       {modalSucursal && documentosModal && (
         <div
@@ -281,7 +246,7 @@ export default function VentasPorSucursalCuenta() {
           >
             <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)]">
               <h3 className="font-semibold">
-                Comprobantes — {modalSucursal.sucursal}{multiMoneda ? ` (${modalSucursal.moneda})` : ""}
+                Comprobantes — {modalSucursal}
               </h3>
               <button
                 type="button"
@@ -323,7 +288,7 @@ export default function VentasPorSucursalCuenta() {
 
             <div className="px-4 py-3 border-t border-[var(--color-border)] flex justify-end">
               <button
-                onClick={() => exportToExcel(documentosModal.documentos, ["Comprobante", "Monto"], `comprobantes-${modalSucursal.sucursal}`)}
+                onClick={() => exportToExcel(documentosModal.documentos, ["Comprobante", "Monto"], `comprobantes-${modalSucursal}`)}
                 className="text-xs bg-green-700 text-white rounded px-3 py-1"
               >
                 Descargar Excel

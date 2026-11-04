@@ -34,26 +34,18 @@ const PM_DOCTYPE_LABEL = {
 };
 const tipoDeMovimiento = (doctype) => PM_DOCTYPE_LABEL[doctype] ?? `DOCTYPE ${doctype} (desconocido)`;
 
-const MONEDA_VACIA = 'En Blanco';
 const MAX_ROWS = 20000;
 
 // PM20000 (abiertos) UNION ALL PM30200 (histórico/pagados), mismas columnas de las dos
 // tablas - VOIDED existe en ambas con el mismo significado (confirmado, ya usado así en
 // getComprasPorSucursal.js).
-// Cylius factura en UYU/USD sin tipo de cambio en la base y confirmado que PM20000/
-// PM30200 tienen CURNCYID con el mismo significado que en Ventas (moneda original del
-// documento, no convertida) - por eso `unionPm` suma esa columna solo cuando hace falta
-// separar por moneda (multiMoneda), sin tocar la consulta para el resto de las empresas.
-const unionPm = (multiMoneda) => {
-  const monedaCols = multiMoneda ? ', LTRIM(RTRIM(CURNCYID)) AS Moneda' : '';
-  return `
-  SELECT LTRIM(RTRIM(VENDORID)) AS VENDORID, LTRIM(RTRIM(DOCNUMBR)) AS Documento, DOCTYPE, DOCDATE, DOCAMNT, CURTRXAM${monedaCols}
+const unionPm = `
+  SELECT LTRIM(RTRIM(VENDORID)) AS VENDORID, LTRIM(RTRIM(DOCNUMBR)) AS Documento, DOCTYPE, DOCDATE, DOCAMNT, CURTRXAM
   FROM PM20000 WHERE ISNULL(VOIDED, 0) = 0
   UNION ALL
-  SELECT LTRIM(RTRIM(VENDORID)) AS VENDORID, LTRIM(RTRIM(DOCNUMBR)) AS Documento, DOCTYPE, DOCDATE, DOCAMNT, CURTRXAM${monedaCols}
+  SELECT LTRIM(RTRIM(VENDORID)) AS VENDORID, LTRIM(RTRIM(DOCNUMBR)) AS Documento, DOCTYPE, DOCDATE, DOCAMNT, CURTRXAM
   FROM PM30200 WHERE ISNULL(VOIDED, 0) = 0
 `;
-};
 
 const firmarConSigno = (rows, campoMonto) => rows.map((row) => {
   const signo = PM_DOCTYPE_SIGNO[row.DOCTYPE];
@@ -62,28 +54,21 @@ const firmarConSigno = (rows, campoMonto) => rows.map((row) => {
 
 const filtrarPendientes = (rows) => firmarConSigno(rows, 'CURTRXAM').filter((row) => Math.abs(row.Monto) > 0.004);
 
-const listadoProveedores = async (pool, desde, hasta, pendientes, multiMoneda) => {
+const listadoProveedores = async (pool, desde, hasta, pendientes) => {
   const result = await pool.request().query(`
-    SELECT P.VENDORID, LTRIM(RTRIM(V.VENDNAME)) AS VENDNAME, P.Documento, P.DOCTYPE, P.DOCDATE, P.DOCAMNT, P.CURTRXAM${multiMoneda ? ', P.Moneda' : ''}
-    FROM (${unionPm(multiMoneda)}) AS P
+    SELECT P.VENDORID, LTRIM(RTRIM(V.VENDNAME)) AS VENDNAME, P.Documento, P.DOCTYPE, P.DOCDATE, P.DOCAMNT, P.CURTRXAM
+    FROM (${unionPm}) AS P
     INNER JOIN PM00200 AS V ON LTRIM(RTRIM(V.VENDORID)) = P.VENDORID
   `);
 
   const rowsFirmadas = pendientes ? filtrarPendientes(result.recordset) : firmarConSigno(result.recordset, 'DOCAMNT');
 
-  // Cylius factura en UYU/USD sin tipo de cambio en la base - no se puede arrastrar un
-  // solo saldo corrido mezclando monedas (ver el mismo criterio en
-  // getCuentaCorrienteCliente.js). Cada proveedor queda separado en un sub-libro por
-  // moneda cuando multiMoneda, igual que Clientes.
-  const claveDe = (row) => (multiMoneda ? `${row.VENDORID}__${row.Moneda || MONEDA_VACIA}` : row.VENDORID);
-
   const porProveedor = new Map();
   rowsFirmadas.forEach((row) => {
-    const clave = claveDe(row);
-    if (!porProveedor.has(clave)) {
-      porProveedor.set(clave, { VENDORID: row.VENDORID, VENDNAME: row.VENDNAME, Moneda: multiMoneda ? (row.Moneda || MONEDA_VACIA) : undefined, previos: [], enRango: [] });
+    if (!porProveedor.has(row.VENDORID)) {
+      porProveedor.set(row.VENDORID, { VENDORID: row.VENDORID, VENDNAME: row.VENDNAME, previos: [], enRango: [] });
     }
-    const p = porProveedor.get(clave);
+    const p = porProveedor.get(row.VENDORID);
     const item = { Fecha: row.DOCDATE, Tipo: tipoDeMovimiento(row.DOCTYPE), Documento: row.Documento, Monto: row.Monto };
     if (desde && row.DOCDATE < desde) {
       p.previos.push(item);
@@ -105,7 +90,7 @@ const listadoProveedores = async (pool, desde, hasta, pendientes, multiMoneda) =
         };
       });
       return {
-        VENDORID: p.VENDORID, VENDNAME: p.VENDNAME, ...(multiMoneda ? { Moneda: p.Moneda } : {}),
+        VENDORID: p.VENDORID, VENDNAME: p.VENDNAME,
         saldoInicial, movimientos, saldoFinal: saldoCorrido,
       };
     })
@@ -116,7 +101,6 @@ const listadoProveedores = async (pool, desde, hasta, pendientes, multiMoneda) =
     modo: 'listado',
     proveedores,
     columns: ['Fecha', 'Tipo', 'Documento', 'Debe', 'Haber', 'Saldo'],
-    multiMoneda,
   };
 };
 
@@ -127,10 +111,9 @@ const getCuentaCorrienteProveedor = async ({ proveedor, fechaDesde, fechaHasta, 
   const desdeListado = fechaDesde ? new Date(fechaDesde) : null;
   const hastaListado = fechaHasta ? new Date(fechaHasta) : null;
   const pendientesBool = pendientes === true || pendientes === 'true';
-  const multiMoneda = empresa === 'cylius';
 
   if (!proveedor || !proveedor.trim()) {
-    return listadoProveedores(pool, desdeListado, hastaListado, pendientesBool, multiMoneda);
+    return listadoProveedores(pool, desdeListado, hastaListado, pendientesBool);
   }
   const proveedorTrim = proveedor.trim();
 
@@ -148,8 +131,8 @@ const getCuentaCorrienteProveedor = async ({ proveedor, fechaDesde, fechaHasta, 
   const movRequest = pool.request();
   movRequest.input('proveedor', sql.VarChar(15), proveedorTrim);
   const movResult = await movRequest.query(`
-    SELECT TOP (${MAX_ROWS}) P.Documento, P.DOCTYPE, P.DOCDATE, P.DOCAMNT, P.CURTRXAM${multiMoneda ? ', P.Moneda' : ''}
-    FROM (${unionPm(multiMoneda)}) AS P
+    SELECT TOP (${MAX_ROWS}) P.Documento, P.DOCTYPE, P.DOCDATE, P.DOCAMNT, P.CURTRXAM
+    FROM (${unionPm}) AS P
     WHERE P.VENDORID = @proveedor
     ORDER BY P.DOCDATE ASC, P.Documento ASC
   `);
@@ -162,52 +145,25 @@ const getCuentaCorrienteProveedor = async ({ proveedor, fechaDesde, fechaHasta, 
   const desde = fechaDesde ? new Date(fechaDesde) : null;
   const hasta = fechaHasta ? new Date(fechaHasta) : null;
 
-  // Extraído para poder correrlo una vez por moneda cuando multiMoneda (ver
-  // getCuentaCorrienteCliente.js para el mismo criterio del lado de Clientes).
-  const armarLedger = (movs) => {
-    const saldoInicial = movs
-      .filter((m) => desde && m.DOCDATE < desde)
-      .reduce((acc, m) => acc + m.Monto, 0);
-    const enRango = movs.filter((m) => (
-      (!desde || m.DOCDATE >= desde) && (!hasta || m.DOCDATE <= hasta)
-    ));
-    let saldoCorrido = saldoInicial;
-    const movimientos = enRango.map((m) => {
-      saldoCorrido += m.Monto;
-      return {
-        Fecha: m.DOCDATE,
-        Tipo: m.TipoMovimiento ?? '',
-        Documento: m.Documento,
-        Debe: m.Monto > 0 ? m.Monto : 0,
-        Haber: m.Monto < 0 ? -m.Monto : 0,
-        Saldo: saldoCorrido,
-      };
-    });
-    return { saldoInicial, movimientos, saldoFinal: movimientos.length > 0 ? movimientos[movimientos.length - 1].Saldo : saldoInicial };
-  };
-
-  if (multiMoneda) {
-    const porMonedaMap = new Map();
-    movimientosFirmados.forEach((m) => {
-      const moneda = m.Moneda || MONEDA_VACIA;
-      if (!porMonedaMap.has(moneda)) porMonedaMap.set(moneda, []);
-      porMonedaMap.get(moneda).push(m);
-    });
-    const porMoneda = [...porMonedaMap.entries()]
-      .map(([Moneda, movs]) => ({ Moneda, ...armarLedger(movs) }))
-      .sort((a, b) => a.Moneda.localeCompare(b.Moneda));
-
+  const saldoInicial = movimientosFirmados
+    .filter((m) => desde && m.DOCDATE < desde)
+    .reduce((acc, m) => acc + m.Monto, 0);
+  const enRango = movimientosFirmados.filter((m) => (
+    (!desde || m.DOCDATE >= desde) && (!hasta || m.DOCDATE <= hasta)
+  ));
+  let saldoCorrido = saldoInicial;
+  const movimientos = enRango.map((m) => {
+    saldoCorrido += m.Monto;
     return {
-      modo: 'detalle',
-      proveedor: proveedorInfo,
-      multiMoneda: true,
-      porMoneda,
-      columns: ['Fecha', 'Tipo', 'Documento', 'Debe', 'Haber', 'Saldo'],
-      truncated: movResult.recordset.length >= MAX_ROWS,
+      Fecha: m.DOCDATE,
+      Tipo: m.TipoMovimiento ?? '',
+      Documento: m.Documento,
+      Debe: m.Monto > 0 ? m.Monto : 0,
+      Haber: m.Monto < 0 ? -m.Monto : 0,
+      Saldo: saldoCorrido,
     };
-  }
-
-  const { saldoInicial, movimientos, saldoFinal } = armarLedger(movimientosFirmados);
+  });
+  const saldoFinal = movimientos.length > 0 ? movimientos[movimientos.length - 1].Saldo : saldoInicial;
 
   return {
     modo: 'detalle',

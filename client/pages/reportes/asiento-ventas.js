@@ -45,8 +45,7 @@ export default function AsientoVentas() {
     }
   };
 
-  const multiMoneda = !!data?.totalesPorMoneda;
-  const cierra = data && !multiMoneda && Math.abs(data.diferencia) < 0.01;
+  const cierra = data && Math.abs(data.diferencia) < 0.01;
 
   return (
     <div>
@@ -117,9 +116,6 @@ export default function AsientoVentas() {
               <thead>
                 <tr className="bg-gray-50">
                   <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Cuenta</th>
-                  {multiMoneda && (
-                    <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Moneda</th>
-                  )}
                   <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Descripción</th>
                   <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Debe</th>
                   <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Haber</th>
@@ -127,11 +123,8 @@ export default function AsientoVentas() {
               </thead>
               <tbody>
                 {data.rows.map((row, i) => (
-                  <tr key={`${row.Cuenta}-${row.Moneda ?? ""}`} className={i % 2 ? "" : "bg-gray-50/60"}>
+                  <tr key={row.Cuenta} className={i % 2 ? "" : "bg-gray-50/60"}>
                     <td className="px-4 py-2 border-b border-[var(--color-border)] tabular-nums whitespace-nowrap">{row.Cuenta}</td>
-                    {multiMoneda && (
-                      <td className="px-4 py-2 border-b border-[var(--color-border)]">{row.Moneda}</td>
-                    )}
                     <td className="px-4 py-2 border-b border-[var(--color-border)] whitespace-nowrap">{row.CuentaDescripcion}</td>
                     <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{row.Debe ? formatMonto(row.Debe) : ""}</td>
                     <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{row.Haber ? formatMonto(row.Haber) : ""}</td>
@@ -139,43 +132,20 @@ export default function AsientoVentas() {
                 ))}
               </tbody>
               <tfoot>
-                {multiMoneda ? (
-                  data.totalesPorMoneda.map((t) => (
-                    <tr key={t.Moneda} className="bg-gray-100 font-semibold">
-                      <td className="px-4 py-2 border-t-2 border-[var(--color-border)]" colSpan={2}>Total {t.Moneda}</td>
-                      <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(t.totalDebe)}</td>
-                      <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(t.totalHaber)}</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr className="bg-gray-100 font-semibold">
-                    <td className="px-4 py-2 border-t-2 border-[var(--color-border)]" colSpan={2}>Total</td>
-                    <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(data.totalDebe)}</td>
-                    <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(data.totalHaber)}</td>
-                  </tr>
-                )}
+                <tr className="bg-gray-100 font-semibold">
+                  <td className="px-4 py-2 border-t-2 border-[var(--color-border)]" colSpan={2}>Total</td>
+                  <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(data.totalDebe)}</td>
+                  <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(data.totalHaber)}</td>
+                </tr>
               </tfoot>
             </table>
           </div>
 
-          {multiMoneda ? (
-            data.totalesPorMoneda.map((t) => {
-              const cierraMoneda = Math.abs(t.diferencia) < 0.01;
-              return (
-                <p key={t.Moneda} className={`px-4 py-3 text-sm border-t border-[var(--color-border)] ${cierraMoneda ? "text-green-700" : "text-red-600 font-semibold"}`}>
-                  {cierraMoneda
-                    ? `El asiento en ${t.Moneda} cierra: Debe = Haber.`
-                    : `El asiento en ${t.Moneda} NO cierra. Diferencia: ${formatMonto(t.diferencia)}`}
-                </p>
-              );
-            })
-          ) : (
-            <p className={`px-4 py-3 text-sm border-t border-[var(--color-border)] ${cierra ? "text-green-700" : "text-red-600 font-semibold"}`}>
-              {cierra
-                ? "El asiento cierra: Debe = Haber."
-                : `El asiento NO cierra. Diferencia: ${formatMonto(data.diferencia)}`}
-            </p>
-          )}
+          <p className={`px-4 py-3 text-sm border-t border-[var(--color-border)] ${cierra ? "text-green-700" : "text-red-600 font-semibold"}`}>
+            {cierra
+              ? "El asiento cierra: Debe = Haber."
+              : `El asiento NO cierra. Diferencia: ${formatMonto(data.diferencia)}`}
+          </p>
         </div>
       )}
     </div>

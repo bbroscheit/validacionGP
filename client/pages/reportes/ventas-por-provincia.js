@@ -48,7 +48,6 @@ export default function VentasPorProvincia() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [provinciaSeleccionada, setProvinciaSeleccionada] = useState(null);
-  const [monedaSeleccionada, setMonedaSeleccionada] = useState(null);
 
   const ejecutarBusqueda = async () => {
     setLoading(true);
@@ -134,9 +133,6 @@ export default function VentasPorProvincia() {
               <thead>
                 <tr className="bg-gray-50">
                   <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Provincia</th>
-                  {data.totalesPorMoneda && (
-                    <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Moneda</th>
-                  )}
                   <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Comprobantes</th>
                   <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Neto</th>
                   <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Impuestos</th>
@@ -146,14 +142,11 @@ export default function VentasPorProvincia() {
               <tbody>
                 {data.rows.map((row, i) => (
                   <tr
-                    key={`${row.Provincia}-${row.Moneda ?? ""}`}
-                    onClick={() => { setProvinciaSeleccionada(row.Provincia); setMonedaSeleccionada(row.Moneda ?? null); }}
+                    key={row.Provincia}
+                    onClick={() => setProvinciaSeleccionada(row.Provincia)}
                     className={`cursor-pointer hover:bg-blue-50 ${i % 2 ? "" : "bg-gray-50/60"}`}
                   >
                     <td className="px-4 py-2 border-b border-[var(--color-border)] text-blue-700 underline">{row.Provincia}</td>
-                    {data.totalesPorMoneda && (
-                      <td className="px-4 py-2 border-b border-[var(--color-border)]">{row.Moneda}</td>
-                    )}
                     <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatEntero(row.CantidadComprobantes)}</td>
                     <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(row.Neto)}</td>
                     <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(row.Impuestos)}</td>
@@ -162,26 +155,13 @@ export default function VentasPorProvincia() {
                 ))}
               </tbody>
               <tfoot>
-                {data.totalesPorMoneda ? (
-                  data.totalesPorMoneda.map((t) => (
-                    <tr key={t.Moneda} className="bg-gray-100 font-semibold">
-                      <td className="px-4 py-2 border-t-2 border-[var(--color-border)]">Total {t.Moneda}</td>
-                      <td className="px-4 py-2 border-t-2 border-[var(--color-border)]"></td>
-                      <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatEntero(t.totalComprobantes)}</td>
-                      <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(t.totalNeto)}</td>
-                      <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(t.totalImpuestos)}</td>
-                      <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(t.totalGeneral)}</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr className="bg-gray-100 font-semibold">
-                    <td className="px-4 py-2 border-t-2 border-[var(--color-border)]">Total general</td>
-                    <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatEntero(data.totalComprobantes)}</td>
-                    <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(data.totalNeto)}</td>
-                    <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(data.totalImpuestos)}</td>
-                    <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(data.totalGeneral)}</td>
-                  </tr>
-                )}
+                <tr className="bg-gray-100 font-semibold">
+                  <td className="px-4 py-2 border-t-2 border-[var(--color-border)]">Total general</td>
+                  <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatEntero(data.totalComprobantes)}</td>
+                  <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(data.totalNeto)}</td>
+                  <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(data.totalImpuestos)}</td>
+                  <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(data.totalGeneral)}</td>
+                </tr>
               </tfoot>
             </table>
           </div>
@@ -194,11 +174,11 @@ export default function VentasPorProvincia() {
           tipo="provincia"
           campo="Provincia"
           campoLabel="Provincia"
-          valorGrupo={data.totalesPorMoneda ? `${provinciaSeleccionada} (${monedaSeleccionada})` : provinciaSeleccionada}
-          documentos={data.base.filter((row) => row.Provincia === provinciaSeleccionada && (!data.totalesPorMoneda || row.Moneda === monedaSeleccionada))}
+          valorGrupo={provinciaSeleccionada}
+          documentos={data.base.filter((row) => row.Provincia === provinciaSeleccionada)}
           sugerencias={PROVINCIAS_ARGENTINA}
           modoSeleccion="lista"
-          onClose={() => { setProvinciaSeleccionada(null); setMonedaSeleccionada(null); }}
+          onClose={() => setProvinciaSeleccionada(null)}
           onGuardado={ejecutarBusqueda}
         />
       )}

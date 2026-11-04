@@ -12,6 +12,11 @@ const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, 
 // Igual que en Gastos/Compras: GL20000.VOIDED no sirve (siempre da 0), se cruza contra
 // PM30200/PM20000.VOIDED=1 por DOCNUMBR+VENDORID.
 //
+// Cylius factura en UYU/USD, pero el Libro Mayor (GL20000) solo existe en la moneda
+// funcional de la compañía (UYU) - no hace falta separar nada por moneda acá (confirmado
+// igual que en getAsientoVentas.js, cruzando un comprobante real en USD contra su asiento:
+// el GL queda en UYU, nunca en dólares).
+//
 // El filtro por sucursal se sacó por ahora (código comentado más abajo, por si hace
 // falta reactivarlo): a diferencia de Ventas, acá la Zona es una dimensión de
 // Contabilidad Analítica por línea de asiento, no un campo de cabecera compartido por
@@ -19,7 +24,6 @@ const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, 
 // Zona cargada, así que filtrando por una sucursal puntual el asiento nunca cierra
 // (falta siempre la contrapartida). Confirmado contra PRD08.
 const MAX_ROWS = 100000;
-const MONEDA_VACIA = 'En Blanco';
 
 const getAsientoCompras = async ({ fechaDesde, fechaHasta, empresa = 'ecobahia' /* , sucursal */ }) => {
   if (!fechaDesde || !fechaHasta) {
@@ -28,18 +32,6 @@ const getAsientoCompras = async ({ fechaDesde, fechaHasta, empresa = 'ecobahia' 
 
   const pool = await POOLS[empresa]();
   // const sucursalFiltro = sucursal ? sucursal.trim().toUpperCase() : null;
-
-  // Cylius factura en UYU/USD sin tipo de cambio en la base, y GL20000 queda en la
-  // moneda original del comprobante (confirmado igual que en Ventas) - acá la moneda no
-  // vive en el comprobante de compra en sí (PM20000/PM30200 no tienen cabecera única
-  // como SOP30200), hay que resolverla cruzando por DOCNUMBR+VENDORID contra la que esté
-  // abierta (PM20000) o pagada (PM30200) - un documento vive en una sola de las dos.
-  const multiMoneda = empresa === 'cylius';
-  const monedaSelect = multiMoneda ? ', LTRIM(RTRIM(COALESCE(PM1.CURNCYID, PM2.CURNCYID))) AS Moneda' : '';
-  const monedaJoin = multiMoneda ? `
-      LEFT JOIN PM30200 AS PM1 ON LTRIM(RTRIM(PM1.DOCNUMBR)) = LTRIM(RTRIM(G.ORDOCNUM)) AND LTRIM(RTRIM(PM1.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
-      LEFT JOIN PM20000 AS PM2 ON LTRIM(RTRIM(PM2.DOCNUMBR)) = LTRIM(RTRIM(G.ORDOCNUM)) AND LTRIM(RTRIM(PM2.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
-  ` : '';
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
@@ -109,11 +101,10 @@ const getAsientoCompras = async ({ fechaDesde, fechaHasta, empresa = 'ecobahia' 
       LTRIM(RTRIM(N.ACTNUMST)) AS Cuenta,
       LTRIM(RTRIM(A.ACTDESCR)) AS CuentaDescripcion,
       G.DEBITAMT,
-      G.CRDTAMNT${monedaSelect}
+      G.CRDTAMNT
     FROM GL20000 AS G
     INNER JOIN GL00105 AS N ON N.ACTINDX = G.ACTINDX
     INNER JOIN GL00100 AS A ON A.ACTINDX = G.ACTINDX
-    ${monedaJoin}
     WHERE
       LTRIM(RTRIM(G.SOURCDOC)) IN ('PMTRX', 'PMVVR')
       AND G.TRXDATE >= @fechaDesde
@@ -154,60 +145,43 @@ const getAsientoCompras = async ({ fechaDesde, fechaHasta, empresa = 'ecobahia' 
 
   const base = detalle.recordset.map((row) => ({
     Comprobante: row.Comprobante,
-    ...(multiMoneda ? { Moneda: row.Moneda || MONEDA_VACIA } : {}),
     Cuenta: row.Cuenta,
     CuentaDescripcion: row.CuentaDescripcion,
     Debe: row.DEBITAMT || 0,
     Haber: row.CRDTAMNT || 0,
   }));
 
-  const claveDe = (row) => (multiMoneda ? `${row.Cuenta}__${row.Moneda}` : row.Cuenta);
-
   const agrupado = new Map();
   base.forEach((row) => {
-    const clave = claveDe(row);
-    if (!agrupado.has(clave)) {
-      agrupado.set(clave, { Cuenta: row.Cuenta, ...(multiMoneda ? { Moneda: row.Moneda } : {}), CuentaDescripcion: row.CuentaDescripcion, neto: 0 });
+    if (!agrupado.has(row.Cuenta)) {
+      agrupado.set(row.Cuenta, { Cuenta: row.Cuenta, CuentaDescripcion: row.CuentaDescripcion, neto: 0 });
     }
-    agrupado.get(clave).neto += row.Debe - row.Haber;
+    agrupado.get(row.Cuenta).neto += row.Debe - row.Haber;
   });
 
   const rows = [...agrupado.values()]
-    .sort((a, b) => a.Cuenta.localeCompare(b.Cuenta) || (multiMoneda ? a.Moneda.localeCompare(b.Moneda) : 0))
-    .map(({ Cuenta, Moneda, CuentaDescripcion, neto }) => ({
+    .sort((a, b) => a.Cuenta.localeCompare(b.Cuenta))
+    .map(({ Cuenta, CuentaDescripcion, neto }) => ({
       Cuenta,
-      ...(multiMoneda ? { Moneda } : {}),
       CuentaDescripcion,
       Debe: neto > 0 ? neto : 0,
       Haber: neto < 0 ? -neto : 0,
     }));
 
-  let totalDebe, totalHaber, diferencia, totalesPorMoneda;
-  if (multiMoneda) {
-    const porMoneda = new Map();
-    rows.forEach((row) => {
-      if (!porMoneda.has(row.Moneda)) porMoneda.set(row.Moneda, { Moneda: row.Moneda, totalDebe: 0, totalHaber: 0 });
-      const t = porMoneda.get(row.Moneda);
-      t.totalDebe += row.Debe;
-      t.totalHaber += row.Haber;
-    });
-    totalesPorMoneda = [...porMoneda.values()]
-      .map((t) => ({ ...t, diferencia: t.totalDebe - t.totalHaber }))
-      .sort((a, b) => a.Moneda.localeCompare(b.Moneda));
-  } else {
-    totalDebe = rows.reduce((acc, row) => acc + row.Debe, 0);
-    totalHaber = rows.reduce((acc, row) => acc + row.Haber, 0);
-    diferencia = totalDebe - totalHaber;
-  }
+  const totalDebe = rows.reduce((acc, row) => acc + row.Debe, 0);
+  const totalHaber = rows.reduce((acc, row) => acc + row.Haber, 0);
+  const diferencia = totalDebe - totalHaber;
 
   return {
     totalCount,
     truncated: totalCount > MAX_ROWS,
     base,
-    baseColumns: multiMoneda ? ['Comprobante', 'Moneda', 'Cuenta', 'CuentaDescripcion', 'Debe', 'Haber'] : ['Comprobante', 'Cuenta', 'CuentaDescripcion', 'Debe', 'Haber'],
+    baseColumns: ['Comprobante', 'Cuenta', 'CuentaDescripcion', 'Debe', 'Haber'],
     rows,
-    columns: multiMoneda ? ['Cuenta', 'Moneda', 'CuentaDescripcion', 'Debe', 'Haber'] : ['Cuenta', 'CuentaDescripcion', 'Debe', 'Haber'],
-    ...(multiMoneda ? { totalesPorMoneda } : { totalDebe, totalHaber, diferencia }),
+    columns: ['Cuenta', 'CuentaDescripcion', 'Debe', 'Haber'],
+    totalDebe,
+    totalHaber,
+    diferencia,
   };
 };
 

@@ -6,8 +6,10 @@ const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, 
 // Reporte - Ventas por provincia: igual que Ventas por sucursal, pero agrupa SOP30200 por
 // STATE (provincia de la ficha del cliente/comprobante) en vez de PHONE3. Misma lógica de
 // Neto/Impuestos/Total y mismo signo invertido en notas de crédito - ver
-// getVentasPorSucursal.js para el detalle de esas cuentas. No existe para sist2
-// (bloqueado en el router), pero sí aplica a Ecosistemas Patagónicos igual que Ecobahia.
+// getVentasPorSucursal.js para el detalle de esas cuentas (incluida la nota sobre por qué
+// Cylius no necesita separar por moneda: SUBTOTAL/TAXAMNT/BCKTXAMT ya vienen en la moneda
+// funcional UYU). No existe para sist2 (bloqueado en el router), pero sí aplica a
+// Ecosistemas Patagónicos igual que Ecobahia.
 const MONEDA_VACIA = 'En Blanco';
 const MAX_ROWS = 100000;
 
@@ -18,11 +20,6 @@ const getVentasPorProvincia = async ({ fechaDesde, fechaHasta, soloConP = true, 
 
   const pool = await POOLS[empresa]();
   const soloConPBool = soloConP === false || soloConP === 'false' ? false : true;
-
-  // Mismo criterio que getVentasPorSucursal.js: Cylius factura en UYU/USD sin tipo de
-  // cambio en la base, así que ahí se agrupa también por moneda y se totaliza aparte.
-  const multiMoneda = empresa === 'cylius';
-  const monedaSelect = multiMoneda ? ', LTRIM(RTRIM(H.CURNCYID)) AS Moneda' : '';
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
@@ -54,7 +51,7 @@ const getVentasPorProvincia = async ({ fechaDesde, fechaHasta, soloConP = true, 
         LTRIM(RTRIM(C.CUSTNAME)) AS NombreCliente,
         ISNULL(H.SUBTOTAL, 0) AS SUBTOTAL,
         ISNULL(H.TAXAMNT, 0) AS TAXAMNT,
-        ISNULL(H.BCKTXAMT, 0) AS BCKTXAMT${monedaSelect}
+        ISNULL(H.BCKTXAMT, 0) AS BCKTXAMT
       FROM SOP30200 AS H
       LEFT JOIN RM00101 AS C ON C.CUSTNMBR = H.CUSTNMBR
       WHERE
@@ -80,7 +77,6 @@ const getVentasPorProvincia = async ({ fechaDesde, fechaHasta, soloConP = true, 
     const override = overridesMap.get(row.Comprobante);
     return {
       Provincia: override || provinciaCalculada,
-      ...(multiMoneda ? { Moneda: row.Moneda || MONEDA_VACIA } : {}),
       Comprobante: row.Comprobante,
       DOCDATE: row.DOCDATE,
       Cliente: row.Cliente,
@@ -92,54 +88,36 @@ const getVentasPorProvincia = async ({ fechaDesde, fechaHasta, soloConP = true, 
     };
   });
 
-  const claveDe = (row) => (multiMoneda ? `${row.Provincia}__${row.Moneda}` : row.Provincia);
-
   const agrupado = new Map();
   base.forEach((row) => {
-    const clave = claveDe(row);
-    if (!agrupado.has(clave)) {
-      agrupado.set(clave, { Provincia: row.Provincia, ...(multiMoneda ? { Moneda: row.Moneda } : {}), CantidadComprobantes: 0, Neto: 0, Impuestos: 0, Total: 0 });
+    if (!agrupado.has(row.Provincia)) {
+      agrupado.set(row.Provincia, { Provincia: row.Provincia, CantidadComprobantes: 0, Neto: 0, Impuestos: 0, Total: 0 });
     }
-    const grupo = agrupado.get(clave);
+    const grupo = agrupado.get(row.Provincia);
     grupo.CantidadComprobantes += 1;
     grupo.Neto += row.Neto;
     grupo.Impuestos += row.Impuestos;
     grupo.Total += row.Total;
   });
 
-  const rows = [...agrupado.values()].sort((a, b) => a.Provincia.localeCompare(b.Provincia) || (multiMoneda ? a.Moneda.localeCompare(b.Moneda) : 0));
+  const rows = [...agrupado.values()].sort((a, b) => a.Provincia.localeCompare(b.Provincia));
 
-  let totalComprobantes, totalNeto, totalImpuestos, totalGeneral, totalesPorMoneda;
-  if (multiMoneda) {
-    const porMoneda = new Map();
-    rows.forEach((row) => {
-      if (!porMoneda.has(row.Moneda)) porMoneda.set(row.Moneda, { Moneda: row.Moneda, totalComprobantes: 0, totalNeto: 0, totalImpuestos: 0, totalGeneral: 0 });
-      const t = porMoneda.get(row.Moneda);
-      t.totalComprobantes += row.CantidadComprobantes;
-      t.totalNeto += row.Neto;
-      t.totalImpuestos += row.Impuestos;
-      t.totalGeneral += row.Total;
-    });
-    totalesPorMoneda = [...porMoneda.values()].sort((a, b) => a.Moneda.localeCompare(b.Moneda));
-  } else {
-    totalComprobantes = rows.reduce((acc, row) => acc + row.CantidadComprobantes, 0);
-    totalNeto = rows.reduce((acc, row) => acc + row.Neto, 0);
-    totalImpuestos = rows.reduce((acc, row) => acc + row.Impuestos, 0);
-    totalGeneral = totalNeto + totalImpuestos;
-  }
+  const totalComprobantes = rows.reduce((acc, row) => acc + row.CantidadComprobantes, 0);
+  const totalNeto = rows.reduce((acc, row) => acc + row.Neto, 0);
+  const totalImpuestos = rows.reduce((acc, row) => acc + row.Impuestos, 0);
+  const totalGeneral = totalNeto + totalImpuestos;
 
   return {
     totalCount,
     truncated: totalCount > MAX_ROWS,
     base,
-    baseColumns: multiMoneda
-      ? ['Provincia', 'Moneda', 'Comprobante', 'DOCDATE', 'Cliente', 'NombreCliente', 'Editado', 'Neto', 'Impuestos', 'Total']
-      : ['Provincia', 'Comprobante', 'DOCDATE', 'Cliente', 'NombreCliente', 'Editado', 'Neto', 'Impuestos', 'Total'],
+    baseColumns: ['Provincia', 'Comprobante', 'DOCDATE', 'Cliente', 'NombreCliente', 'Editado', 'Neto', 'Impuestos', 'Total'],
     rows,
-    columns: multiMoneda
-      ? ['Provincia', 'Moneda', 'CantidadComprobantes', 'Neto', 'Impuestos', 'Total']
-      : ['Provincia', 'CantidadComprobantes', 'Neto', 'Impuestos', 'Total'],
-    ...(multiMoneda ? { totalesPorMoneda } : { totalComprobantes, totalNeto, totalImpuestos, totalGeneral }),
+    columns: ['Provincia', 'CantidadComprobantes', 'Neto', 'Impuestos', 'Total'],
+    totalComprobantes,
+    totalNeto,
+    totalImpuestos,
+    totalGeneral,
   };
 };
 

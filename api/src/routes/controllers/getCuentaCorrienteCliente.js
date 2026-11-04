@@ -21,6 +21,12 @@ const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, 
 // RMDTYPAL (tipo de documento) - mismos códigos y mismo signo que sist2 (ver
 // getCuentaCorrienteSist2.js para el detalle completo de cada código, confirmado también
 // contra datos reales de PRD08: se ven 1/3/7/8/9, el resto no apareció todavía).
+//
+// Cylius factura en UYU/USD, pero ORTRXAMT/CURTRXAM en RM20101 ya vienen convertidos a la
+// moneda funcional (UYU) por GP mismo (a pesar del prefijo "OR" de "originating", que
+// podría hacer pensar lo contrario) - confirmado cruzando un comprobante real: ORTRXAMT
+// coincide exacto con el DOCAMNT ya convertido de SOP30200, no con el monto real en
+// dólares (ORDOCAMT). No hay ninguna mezcla de monedas que resolver.
 const RMDTYPAL_SIGNO = { 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: -1, 7: -1, 8: -1, 9: -1 };
 const RMDTYPAL_LABEL = {
   1: 'Factura', 2: 'Nota de Débito', 3: 'Cargo Financiero', 4: 'Servicio/Reparación',
@@ -28,7 +34,6 @@ const RMDTYPAL_LABEL = {
 };
 const tipoDeMovimiento = (rmdtypal) => RMDTYPAL_LABEL[rmdtypal] ?? `RMDTYPAL ${rmdtypal} (desconocido)`;
 
-const MONEDA_VACIA = 'En Blanco';
 const MAX_ROWS = 20000;
 const LOTE_MAXIMO = 1500; // margen bajo el límite de ~2100 parámetros por query de SQL Server
 
@@ -148,11 +153,10 @@ const resolverMontosPorSucursal = async (pool, rows, sucursalFiltro, modoPendien
     .filter((row) => Math.abs(row.Monto) > 0.004);
 };
 
-const listadoClientes = async (pool, desde, hasta, sucursalFiltro, pendientes, overridesMap, multiMoneda) => {
-  const monedaSelect = multiMoneda ? ', LTRIM(RTRIM(R.CURNCYID)) AS Moneda' : '';
+const listadoClientes = async (pool, desde, hasta, sucursalFiltro, pendientes, overridesMap) => {
   const result = await pool.request().query(`
     SELECT LTRIM(RTRIM(R.CUSTNMBR)) AS CUSTNMBR, LTRIM(RTRIM(C.CUSTNAME)) AS CUSTNAME,
-      LTRIM(RTRIM(R.DOCNUMBR)) AS Documento, R.RMDTYPAL, R.DOCDATE, R.ORTRXAMT, R.CURTRXAM${monedaSelect}
+      LTRIM(RTRIM(R.DOCNUMBR)) AS Documento, R.RMDTYPAL, R.DOCDATE, R.ORTRXAMT, R.CURTRXAM
     FROM RM20101 AS R
     INNER JOIN RM00101 AS C ON C.CUSTNMBR = R.CUSTNMBR
     WHERE ISNULL(R.VOIDSTTS, 0) = 0
@@ -166,20 +170,12 @@ const listadoClientes = async (pool, desde, hasta, sucursalFiltro, pendientes, o
     });
   const rows = await resolverMontosPorSucursal(pool, rowsFirmadas, sucursalFiltro, pendientes, overridesMap);
 
-  // Cylius factura en UYU/USD sin tipo de cambio en la base - no se puede arrastrar un
-  // solo saldo corrido mezclando monedas (un pago en USD no cancela una factura en UYU).
-  // Por eso, cuando multiMoneda, cada cliente queda separado en un sub-libro por moneda
-  // (misma clave Cliente+Moneda) en vez de uno solo - el resto de los emprendimientos
-  // sigue agrupando únicamente por cliente, igual que siempre.
-  const claveDe = (row) => (multiMoneda ? `${row.CUSTNMBR}__${row.Moneda || MONEDA_VACIA}` : row.CUSTNMBR);
-
   const porCliente = new Map();
   rows.forEach((row) => {
-    const clave = claveDe(row);
-    if (!porCliente.has(clave)) {
-      porCliente.set(clave, { CUSTNMBR: row.CUSTNMBR, CUSTNAME: row.CUSTNAME, Moneda: multiMoneda ? (row.Moneda || MONEDA_VACIA) : undefined, previos: [], enRango: [] });
+    if (!porCliente.has(row.CUSTNMBR)) {
+      porCliente.set(row.CUSTNMBR, { CUSTNMBR: row.CUSTNMBR, CUSTNAME: row.CUSTNAME, previos: [], enRango: [] });
     }
-    const c = porCliente.get(clave);
+    const c = porCliente.get(row.CUSTNMBR);
     const item = { Fecha: row.DOCDATE, Tipo: tipoDeMovimiento(row.RMDTYPAL), Documento: row.Documento, Monto: row.Monto };
     if (desde && row.DOCDATE < desde) {
       c.previos.push(item);
@@ -201,7 +197,7 @@ const listadoClientes = async (pool, desde, hasta, sucursalFiltro, pendientes, o
         };
       });
       return {
-        CUSTNMBR: c.CUSTNMBR, CUSTNAME: c.CUSTNAME, ...(multiMoneda ? { Moneda: c.Moneda } : {}),
+        CUSTNMBR: c.CUSTNMBR, CUSTNAME: c.CUSTNAME,
         saldoInicial, movimientos, saldoFinal: saldoCorrido,
       };
     })
@@ -212,7 +208,6 @@ const listadoClientes = async (pool, desde, hasta, sucursalFiltro, pendientes, o
     modo: 'listado',
     clientes,
     columns: ['Fecha', 'Tipo', 'Documento', 'Debe', 'Haber', 'Saldo'],
-    multiMoneda,
   };
 };
 
@@ -238,12 +233,8 @@ const getCuentaCorrienteCliente = async ({ cliente, fechaDesde, fechaHasta, sucu
   }
   const pendientesBool = pendientes === true || pendientes === 'true';
 
-  // Cylius factura en UYU/USD sin tipo de cambio en la base - ver el comentario largo en
-  // listadoClientes/el return de abajo para el por qué de separar en sub-libros.
-  const multiMoneda = empresa === 'cylius';
-
   if (!cliente || !cliente.trim()) {
-    return listadoClientes(pool, desdeListado, hastaListado, sucursalFiltro, pendientesBool, overridesMap, multiMoneda);
+    return listadoClientes(pool, desdeListado, hastaListado, sucursalFiltro, pendientesBool, overridesMap);
   }
   const clienteTrim = cliente.trim();
 
@@ -258,12 +249,11 @@ const getCuentaCorrienteCliente = async ({ cliente, fechaDesde, fechaHasta, sucu
   }
   const clienteInfo = clienteResult.recordset[0];
 
-  const monedaSelectDetalle = multiMoneda ? ', LTRIM(RTRIM(CURNCYID)) AS Moneda' : '';
   const movRequest = pool.request();
   movRequest.input('cliente', sql.VarChar(15), clienteTrim);
   const movResult = await movRequest.query(`
     SELECT TOP (${MAX_ROWS})
-      LTRIM(RTRIM(CUSTNMBR)) AS CUSTNMBR, LTRIM(RTRIM(DOCNUMBR)) AS Documento, RMDTYPAL, DOCDATE, ORTRXAMT, CURTRXAM${monedaSelectDetalle}
+      LTRIM(RTRIM(CUSTNMBR)) AS CUSTNMBR, LTRIM(RTRIM(DOCNUMBR)) AS Documento, RMDTYPAL, DOCDATE, ORTRXAMT, CURTRXAM
     FROM RM20101
     WHERE LTRIM(RTRIM(CUSTNMBR)) = @cliente AND ISNULL(VOIDSTTS, 0) = 0
     ORDER BY DOCDATE ASC, DOCNUMBR ASC
@@ -281,53 +271,25 @@ const getCuentaCorrienteCliente = async ({ cliente, fechaDesde, fechaHasta, sucu
   const desde = fechaDesde ? new Date(fechaDesde) : null;
   const hasta = fechaHasta ? new Date(fechaHasta) : null;
 
-  // Armar el ledger (saldo inicial + movimientos con saldo corrido) de un subconjunto de
-  // movimientos - extraído para poder correrlo una vez por moneda cuando multiMoneda, en
-  // vez de una sola vez mezclando monedas (ver comentario de arriba en listadoClientes).
-  const armarLedger = (movs) => {
-    const saldoInicial = movs
-      .filter((m) => desde && m.DOCDATE < desde)
-      .reduce((acc, m) => acc + m.Monto, 0);
-    const enRango = movs.filter((m) => (
-      (!desde || m.DOCDATE >= desde) && (!hasta || m.DOCDATE <= hasta)
-    ));
-    let saldoCorrido = saldoInicial;
-    const movimientos = enRango.map((m) => {
-      saldoCorrido += m.Monto;
-      return {
-        Fecha: m.DOCDATE,
-        Tipo: m.TipoMovimiento ?? '',
-        Documento: m.Documento,
-        Debe: m.Monto > 0 ? m.Monto : 0,
-        Haber: m.Monto < 0 ? -m.Monto : 0,
-        Saldo: saldoCorrido,
-      };
-    });
-    return { saldoInicial, movimientos, saldoFinal: movimientos.length > 0 ? movimientos[movimientos.length - 1].Saldo : saldoInicial };
-  };
-
-  if (multiMoneda) {
-    const porMonedaMap = new Map();
-    movimientosTodos.forEach((m) => {
-      const moneda = m.Moneda || MONEDA_VACIA;
-      if (!porMonedaMap.has(moneda)) porMonedaMap.set(moneda, []);
-      porMonedaMap.get(moneda).push(m);
-    });
-    const porMoneda = [...porMonedaMap.entries()]
-      .map(([Moneda, movs]) => ({ Moneda, ...armarLedger(movs) }))
-      .sort((a, b) => a.Moneda.localeCompare(b.Moneda));
-
+  const saldoInicial = movimientosTodos
+    .filter((m) => desde && m.DOCDATE < desde)
+    .reduce((acc, m) => acc + m.Monto, 0);
+  const enRango = movimientosTodos.filter((m) => (
+    (!desde || m.DOCDATE >= desde) && (!hasta || m.DOCDATE <= hasta)
+  ));
+  let saldoCorrido = saldoInicial;
+  const movimientos = enRango.map((m) => {
+    saldoCorrido += m.Monto;
     return {
-      modo: 'detalle',
-      cliente: clienteInfo,
-      multiMoneda: true,
-      porMoneda,
-      columns: ['Fecha', 'Tipo', 'Documento', 'Debe', 'Haber', 'Saldo'],
-      truncated: movResult.recordset.length >= MAX_ROWS,
+      Fecha: m.DOCDATE,
+      Tipo: m.TipoMovimiento ?? '',
+      Documento: m.Documento,
+      Debe: m.Monto > 0 ? m.Monto : 0,
+      Haber: m.Monto < 0 ? -m.Monto : 0,
+      Saldo: saldoCorrido,
     };
-  }
-
-  const { saldoInicial, movimientos, saldoFinal } = armarLedger(movimientosTodos);
+  });
+  const saldoFinal = movimientos.length > 0 ? movimientos[movimientos.length - 1].Saldo : saldoInicial;
 
   return {
     modo: 'detalle',

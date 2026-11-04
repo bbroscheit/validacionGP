@@ -21,7 +21,6 @@ export default function VentasPorSucursal() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [sucursalSeleccionada, setSucursalSeleccionada] = useState(null);
-  const [monedaSeleccionada, setMonedaSeleccionada] = useState(null);
 
   const ejecutarBusqueda = async () => {
     setLoading(true);
@@ -107,9 +106,6 @@ export default function VentasPorSucursal() {
               <thead>
                 <tr className="bg-gray-50">
                   <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Sucursal</th>
-                  {data.totalesPorMoneda && (
-                    <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Moneda</th>
-                  )}
                   <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Comprobantes</th>
                   <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Neto</th>
                   <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Impuestos</th>
@@ -119,14 +115,11 @@ export default function VentasPorSucursal() {
               <tbody>
                 {data.rows.map((row, i) => (
                   <tr
-                    key={`${row.Sucursal}-${row.Moneda ?? ""}`}
-                    onClick={() => { setSucursalSeleccionada(row.Sucursal); setMonedaSeleccionada(row.Moneda ?? null); }}
+                    key={row.Sucursal}
+                    onClick={() => setSucursalSeleccionada(row.Sucursal)}
                     className={`cursor-pointer hover:bg-blue-50 ${i % 2 ? "" : "bg-gray-50/60"}`}
                   >
                     <td className="px-4 py-2 border-b border-[var(--color-border)] text-blue-700 underline">{row.Sucursal}</td>
-                    {data.totalesPorMoneda && (
-                      <td className="px-4 py-2 border-b border-[var(--color-border)]">{row.Moneda}</td>
-                    )}
                     <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatEntero(row.CantidadComprobantes)}</td>
                     <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(row.Neto)}</td>
                     <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(row.Impuestos)}</td>
@@ -135,26 +128,13 @@ export default function VentasPorSucursal() {
                 ))}
               </tbody>
               <tfoot>
-                {data.totalesPorMoneda ? (
-                  data.totalesPorMoneda.map((t) => (
-                    <tr key={t.Moneda} className="bg-gray-100 font-semibold">
-                      <td className="px-4 py-2 border-t-2 border-[var(--color-border)]">Total {t.Moneda}</td>
-                      <td className="px-4 py-2 border-t-2 border-[var(--color-border)]"></td>
-                      <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatEntero(t.totalComprobantes)}</td>
-                      <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(t.totalNeto)}</td>
-                      <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(t.totalImpuestos)}</td>
-                      <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(t.totalGeneral)}</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr className="bg-gray-100 font-semibold">
-                    <td className="px-4 py-2 border-t-2 border-[var(--color-border)]">Total general</td>
-                    <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatEntero(data.totalComprobantes)}</td>
-                    <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(data.totalNeto)}</td>
-                    <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(data.totalImpuestos)}</td>
-                    <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(data.totalGeneral)}</td>
-                  </tr>
-                )}
+                <tr className="bg-gray-100 font-semibold">
+                  <td className="px-4 py-2 border-t-2 border-[var(--color-border)]">Total general</td>
+                  <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatEntero(data.totalComprobantes)}</td>
+                  <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(data.totalNeto)}</td>
+                  <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(data.totalImpuestos)}</td>
+                  <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(data.totalGeneral)}</td>
+                </tr>
               </tfoot>
             </table>
           </div>
@@ -167,10 +147,10 @@ export default function VentasPorSucursal() {
           tipo="sucursal"
           campo="Sucursal"
           campoLabel="Sucursal"
-          valorGrupo={data.totalesPorMoneda ? `${sucursalSeleccionada} (${monedaSeleccionada})` : sucursalSeleccionada}
-          documentos={data.base.filter((row) => row.Sucursal === sucursalSeleccionada && (!data.totalesPorMoneda || row.Moneda === monedaSeleccionada))}
+          valorGrupo={sucursalSeleccionada}
+          documentos={data.base.filter((row) => row.Sucursal === sucursalSeleccionada)}
           sugerencias={data.rows.map((r) => r.Sucursal).filter((v) => v !== "En Blanco")}
-          onClose={() => { setSucursalSeleccionada(null); setMonedaSeleccionada(null); }}
+          onClose={() => setSucursalSeleccionada(null)}
           onGuardado={ejecutarBusqueda}
         />
       )}
