@@ -1,9 +1,9 @@
-const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolSist2, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolCylius, getGpPoolChile, getGpPoolSist2, sql } = require('../../config/gpPool');
 const { resolverSucursalSist2, CLIENTE_SUCURSAL_JOIN_SIST2, CLIENTE_SUCURSAL_SELECT_SIST2 } = require('../../services/sist2Ventas');
 const { coincideSucursal } = require('../../services/autorizacion');
 const { getOverridesMap } = require('../../services/clasificacionOverrides');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, sist2: getGpPoolSist2 };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, cylius: getGpPoolCylius, chile: getGpPoolChile, sist2: getGpPoolSist2 };
 
 // Reporte - Ventas por sucursal y cuenta contable
 // GL20000 filtrado por SOURCDOC = 'SJ' (asientos generados por el módulo de ventas,
@@ -23,6 +23,10 @@ const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, 
 // (a diferencia de su hermano getVentasPorCategoriaContribuyente.js, que sí quedó bien
 // resuelto al onboardear Ecosistemas) - Ecosistemas estaba excluyendo la cuenta
 // equivocada, dejando su contrapartida de cobro adentro del Neto por error.
+// Cylius (PRD07) confirmado contra su propio plan de cuentas: 113110-01-000 = "Deudores
+// por Ventas Nacionales" (mismo número que Ecobahia/Ecoportatiles).
+// BAEBSA/Chile (PRD05) confirmado igual: 113110-01-000 = "Deudores por Ventas Nacionales"
+// (mismo número de nuevo, categoría 87).
 // El monto por cuenta es CRDTAMNT - DEBITAMT: en una factura normal las cuentas de
 // venta/impuestos van al haber, en una nota de crédito GP invierte debe/haber - la resta
 // ya da el signo correcto sin tener que detectar la nota de crédito a mano.
@@ -36,6 +40,8 @@ const CUENTA_DEUDORES_POR_EMPRESA = {
   ecosistemas: '112110-02-000',
   ecoportatiles: '113110-01-000',
   baxpa: '113110',
+  cylius: '113110-01-000',
+  chile: '113110-01-000',
   sist2: '113110-01-000',
 };
 const MAX_ROWS = 100000;
@@ -50,6 +56,12 @@ const getVentasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, soloConP = t
   const pool = await getPool();
   const soloConPBool = soloConP === false || soloConP === 'false' ? false : true;
   const cuentaDeudores = CUENTA_DEUDORES_POR_EMPRESA[empresa];
+
+  // Cylius factura en UYU/USD sin tipo de cambio en la base - mismo criterio que
+  // getVentasPorSucursal.js: se agrupa también por moneda (vía el mismo LEFT JOIN a
+  // SOP30200 que ya trae la sucursal) y se totaliza aparte por moneda.
+  const multiMoneda = empresa === 'cylius';
+  const monedaSelect = multiMoneda ? ', LTRIM(RTRIM(H.CURNCYID)) AS Moneda' : '';
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
@@ -95,7 +107,7 @@ const getVentasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, soloConP = t
         LTRIM(RTRIM(N.ACTNUMST)) AS Cuenta,
         LTRIM(RTRIM(A.ACTDESCR)) AS CuentaDescripcion,
         G.DEBITAMT,
-        G.CRDTAMNT${clienteSucursalSelect}
+        G.CRDTAMNT${clienteSucursalSelect}${monedaSelect}
       FROM GL20000 AS G
       INNER JOIN GL00105 AS N ON N.ACTINDX = G.ACTINDX
       INNER JOIN GL00100 AS A ON A.ACTINDX = G.ACTINDX
@@ -124,6 +136,7 @@ const getVentasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, soloConP = t
     const override = overridesMap.get(row.Comprobante);
     return {
       Sucursal: override || sucursalCalculada || MONEDA_VACIA,
+      ...(multiMoneda ? { Moneda: row.Moneda || MONEDA_VACIA } : {}),
       Comprobante: row.Comprobante,
       Cuenta: row.Cuenta,
       CuentaDescripcion: row.CuentaDescripcion,
@@ -137,25 +150,34 @@ const getVentasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, soloConP = t
 
   const agrupado = new Map();
   baseVisible.forEach((row) => {
-    const key = `${row.Sucursal}||${row.Cuenta}`;
+    const key = multiMoneda ? `${row.Sucursal}||${row.Cuenta}||${row.Moneda}` : `${row.Sucursal}||${row.Cuenta}`;
     if (!agrupado.has(key)) {
-      agrupado.set(key, { Sucursal: row.Sucursal, Cuenta: row.Cuenta, CuentaDescripcion: row.CuentaDescripcion, Monto: 0 });
+      agrupado.set(key, { Sucursal: row.Sucursal, ...(multiMoneda ? { Moneda: row.Moneda } : {}), Cuenta: row.Cuenta, CuentaDescripcion: row.CuentaDescripcion, Monto: 0 });
     }
     agrupado.get(key).Monto += row.Monto;
   });
 
-  const rows = [...agrupado.values()].sort((a, b) => a.Sucursal.localeCompare(b.Sucursal) || a.Cuenta.localeCompare(b.Cuenta));
+  const rows = [...agrupado.values()].sort((a, b) => a.Sucursal.localeCompare(b.Sucursal) || a.Cuenta.localeCompare(b.Cuenta) || (multiMoneda ? a.Moneda.localeCompare(b.Moneda) : 0));
 
-  const totalGeneral = rows.reduce((acc, row) => acc + row.Monto, 0);
+  let totalGeneral, totalesPorMoneda;
+  if (multiMoneda) {
+    const porMoneda = new Map();
+    rows.forEach((row) => {
+      porMoneda.set(row.Moneda, (porMoneda.get(row.Moneda) || 0) + row.Monto);
+    });
+    totalesPorMoneda = [...porMoneda.entries()].map(([Moneda, totalGeneral]) => ({ Moneda, totalGeneral })).sort((a, b) => a.Moneda.localeCompare(b.Moneda));
+  } else {
+    totalGeneral = rows.reduce((acc, row) => acc + row.Monto, 0);
+  }
 
   return {
     totalCount,
     truncated: totalCount > MAX_ROWS,
     base: baseVisible,
-    baseColumns: ['Sucursal', 'Comprobante', 'Cuenta', 'CuentaDescripcion', 'Monto'],
+    baseColumns: multiMoneda ? ['Sucursal', 'Moneda', 'Comprobante', 'Cuenta', 'CuentaDescripcion', 'Monto'] : ['Sucursal', 'Comprobante', 'Cuenta', 'CuentaDescripcion', 'Monto'],
     rows,
-    columns: ['Sucursal', 'Cuenta', 'CuentaDescripcion', 'Monto'],
-    totalGeneral,
+    columns: multiMoneda ? ['Sucursal', 'Moneda', 'Cuenta', 'CuentaDescripcion', 'Monto'] : ['Sucursal', 'Cuenta', 'CuentaDescripcion', 'Monto'],
+    ...(multiMoneda ? { totalesPorMoneda } : { totalGeneral }),
   };
 };
 

@@ -96,14 +96,16 @@ export default function CuentaCorrienteCliente() {
     consultar(clienteSeleccionado ? clienteSeleccionado.CUSTNMBR : null);
   };
 
-  const COLUMNAS_CC_EXCEL = ["Cliente", "Nombre", "Fecha", "Tipo", "Documento", "Debe", "Haber", "Saldo"];
+  const COLUMNAS_CC_EXCEL = data?.multiMoneda
+    ? ["Cliente", "Nombre", "Moneda", "Fecha", "Tipo", "Documento", "Debe", "Haber", "Saldo"]
+    : ["Cliente", "Nombre", "Fecha", "Tipo", "Documento", "Debe", "Haber", "Saldo"];
 
   const armarFilasCuentaCorriente = (clientes) => clientes.flatMap((c) => [
-    { Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: "", Tipo: "", Documento: "Saldo inicial", Debe: null, Haber: null, Saldo: c.saldoInicial },
+    { Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, ...(c.Moneda ? { Moneda: c.Moneda } : {}), Fecha: "", Tipo: "", Documento: "Saldo inicial", Debe: null, Haber: null, Saldo: c.saldoInicial },
     ...c.movimientos.map((m) => ({
-      Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: formatFecha(m.Fecha), Tipo: m.Tipo, Documento: m.Documento, Debe: m.Debe, Haber: m.Haber, Saldo: m.Saldo,
+      Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, ...(c.Moneda ? { Moneda: c.Moneda } : {}), Fecha: formatFecha(m.Fecha), Tipo: m.Tipo, Documento: m.Documento, Debe: m.Debe, Haber: m.Haber, Saldo: m.Saldo,
     })),
-    { Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: "", Tipo: "", Documento: "Saldo final", Debe: null, Haber: null, Saldo: c.saldoFinal },
+    { Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, ...(c.Moneda ? { Moneda: c.Moneda } : {}), Fecha: "", Tipo: "", Documento: "Saldo final", Debe: null, Haber: null, Saldo: c.saldoFinal },
     {},
   ]);
 
@@ -123,7 +125,7 @@ export default function CuentaCorrienteCliente() {
       }
 
       const base = data.clientes.flatMap((c) => c.movimientos.map((m) => ({
-        Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: formatFecha(m.Fecha), Tipo: m.Tipo, Documento: m.Documento, Debe: m.Debe, Haber: m.Haber, Saldo: m.Saldo,
+        Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, ...(c.Moneda ? { Moneda: c.Moneda } : {}), Fecha: formatFecha(m.Fecha), Tipo: m.Tipo, Documento: m.Documento, Debe: m.Debe, Haber: m.Haber, Saldo: m.Saldo,
       })));
 
       const { exportCuentaCorrienteExcel } = await import("@/functions/exportCuentaCorrienteExcel");
@@ -246,9 +248,11 @@ export default function CuentaCorrienteCliente() {
 
           <div className="flex flex-col gap-6">
             {clientesPagina.map((c) => (
-              <div key={c.CUSTNMBR} className="border border-[var(--color-border)] rounded-lg overflow-hidden">
+              <div key={`${c.CUSTNMBR}-${c.Moneda ?? ""}`} className="border border-[var(--color-border)] rounded-lg overflow-hidden">
                 <div className="px-4 py-2 border-b border-[var(--color-border)] bg-gray-50">
-                  <h2 className="font-semibold">{c.CUSTNMBR} - {c.CUSTNAME}</h2>
+                  <h2 className="font-semibold">
+                    {c.CUSTNMBR} - {c.CUSTNAME}{data.multiMoneda ? ` (${c.Moneda})` : ""}
+                  </h2>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-sm">
@@ -314,7 +318,7 @@ export default function CuentaCorrienteCliente() {
         </div>
       )}
 
-      {data && data.modo === "detalle" && (
+      {data && data.modo === "detalle" && !data.multiMoneda && (
         <div className="border border-[var(--color-border)] rounded-lg overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)] bg-gray-50">
             <h2 className="font-semibold">
@@ -383,6 +387,76 @@ export default function CuentaCorrienteCliente() {
           </div>
         </div>
       )}
+
+      {data && data.modo === "detalle" && data.multiMoneda && data.porMoneda.map((pm) => (
+        <div key={pm.Moneda} className="border border-[var(--color-border)] rounded-lg overflow-hidden mb-4">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)] bg-gray-50">
+            <h2 className="font-semibold">
+              {data.cliente.CUSTNMBR} - {data.cliente.CUSTNAME} ({pm.Moneda})
+            </h2>
+            <button
+              onClick={async () => {
+                const { exportCuentaCorrienteExcel } = await import("@/functions/exportCuentaCorrienteExcel");
+                exportCuentaCorrienteExcel(
+                  [{
+                    name: `Cuenta corriente ${pm.Moneda}`,
+                    rows: [
+                      { Fecha: "", Tipo: "", Documento: "Saldo inicial", Debe: null, Haber: null, Saldo: pm.saldoInicial },
+                      ...pm.movimientos.map((m) => ({ ...m, Fecha: formatFecha(m.Fecha) })),
+                      { Fecha: "", Tipo: "", Documento: "Saldo final", Debe: null, Haber: null, Saldo: pm.saldoFinal },
+                    ],
+                    columns: data.columns,
+                  }],
+                  `cuenta-corriente-${data.cliente.CUSTNMBR}-${pm.Moneda}`
+                );
+              }}
+              className="text-xs bg-green-700 text-white rounded px-3 py-1"
+            >
+              Descargar Excel
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Fecha</th>
+                  <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Tipo</th>
+                  <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Documento</th>
+                  <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Debe</th>
+                  <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Haber</th>
+                  <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Saldo</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="bg-gray-100 italic">
+                  <td className="px-4 py-2 border-b border-[var(--color-border)]" colSpan={5}>Saldo inicial</td>
+                  <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(pm.saldoInicial)}</td>
+                </tr>
+                {pm.movimientos.map((row, i) => (
+                  <tr key={`${row.Documento}-${i}`} className={i % 2 ? "" : "bg-gray-50/60"}>
+                    <td className="px-4 py-2 border-b border-[var(--color-border)] whitespace-nowrap">{formatFecha(row.Fecha)}</td>
+                    <td className="px-4 py-2 border-b border-[var(--color-border)] whitespace-nowrap">{row.Tipo}</td>
+                    <td className="px-4 py-2 border-b border-[var(--color-border)] whitespace-nowrap">{row.Documento}</td>
+                    <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{row.Debe ? formatMonto(row.Debe) : ""}</td>
+                    <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{row.Haber ? formatMonto(row.Haber) : ""}</td>
+                    <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums font-medium">{formatMonto(row.Saldo)}</td>
+                  </tr>
+                ))}
+                {pm.movimientos.length === 0 && (
+                  <tr><td colSpan={6} className="px-4 py-3 text-center text-gray-500">Sin movimientos en el rango elegido.</td></tr>
+                )}
+              </tbody>
+              <tfoot>
+                <tr className="bg-gray-100 font-semibold">
+                  <td className="px-4 py-2 border-t-2 border-[var(--color-border)]" colSpan={5}>Saldo final</td>
+                  <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(pm.saldoFinal)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

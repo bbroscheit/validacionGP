@@ -1,8 +1,8 @@
-const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolCylius, getGpPoolChile, sql } = require('../../config/gpPool');
 const { coincideSucursal } = require('../../services/autorizacion');
 const { getOverridesMap } = require('../../services/clasificacionOverrides');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, cylius: getGpPoolCylius, chile: getGpPoolChile };
 
 // Reporte - Compras por sucursal y cuenta contable
 // Mismo esquema que getVentasPorSucursalCuenta.js pero para compras: GL20000 filtrado por
@@ -31,6 +31,16 @@ const getComprasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, empresa = '
   }
 
   const pool = await POOLS[empresa]();
+
+  // Cylius factura en UYU/USD sin tipo de cambio en la base - igual que en
+  // getAsientoCompras.js, la moneda del comprobante no vive en la cabecera de GL20000,
+  // hay que cruzarla contra PM30200/PM20000 por DOCNUMBR+VENDORID.
+  const multiMoneda = empresa === 'cylius';
+  const monedaSelect = multiMoneda ? ', LTRIM(RTRIM(COALESCE(PM1.CURNCYID, PM2.CURNCYID))) AS Moneda' : '';
+  const monedaJoin = multiMoneda ? `
+      LEFT JOIN PM30200 AS PM1 ON LTRIM(RTRIM(PM1.DOCNUMBR)) = LTRIM(RTRIM(G.ORDOCNUM)) AND LTRIM(RTRIM(PM1.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
+      LEFT JOIN PM20000 AS PM2 ON LTRIM(RTRIM(PM2.DOCNUMBR)) = LTRIM(RTRIM(G.ORDOCNUM)) AND LTRIM(RTRIM(PM2.VENDORID)) = LTRIM(RTRIM(G.ORMSTRID))
+  ` : '';
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
@@ -91,11 +101,12 @@ const getComprasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, empresa = '
         LTRIM(RTRIM(N.ACTNUMST)) AS Cuenta,
         LTRIM(RTRIM(A.ACTDESCR)) AS CuentaDescripcion,
         COALESCE(AA.AA_DEBITAMT, G.DEBITAMT) AS DEBITAMT,
-        COALESCE(AA.AA_CRDTAMNT, G.CRDTAMNT) AS CRDTAMNT
+        COALESCE(AA.AA_CRDTAMNT, G.CRDTAMNT) AS CRDTAMNT${monedaSelect}
       FROM GL20000 AS G
       INNER JOIN GL00105 AS N ON N.ACTINDX = G.ACTINDX
       INNER JOIN GL00100 AS A ON A.ACTINDX = G.ACTINDX
       LEFT JOIN AADetalle AS AA ON AA.JRNENTRY = G.JRNENTRY AND AA.ACTINDX = G.ACTINDX AND AA.SEQNUMBR = G.SEQNUMBR
+      ${monedaJoin}
       WHERE
         LTRIM(RTRIM(G.SOURCDOC)) IN ('PMTRX', 'PMVVR')
         AND G.TRXDATE >= @fechaDesde
@@ -112,6 +123,7 @@ const getComprasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, empresa = '
     const override = overridesMap.get(row.Comprobante);
     return {
       Sucursal: override || row.Sucursal || MONEDA_VACIA,
+      ...(multiMoneda ? { Moneda: row.Moneda || MONEDA_VACIA } : {}),
       Comprobante: row.Comprobante,
       Cuenta: row.Cuenta,
       CuentaDescripcion: row.CuentaDescripcion,
@@ -125,25 +137,34 @@ const getComprasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, empresa = '
 
   const agrupado = new Map();
   baseVisible.forEach((row) => {
-    const key = `${row.Sucursal}||${row.Cuenta}`;
+    const key = multiMoneda ? `${row.Sucursal}||${row.Cuenta}||${row.Moneda}` : `${row.Sucursal}||${row.Cuenta}`;
     if (!agrupado.has(key)) {
-      agrupado.set(key, { Sucursal: row.Sucursal, Cuenta: row.Cuenta, CuentaDescripcion: row.CuentaDescripcion, Monto: 0 });
+      agrupado.set(key, { Sucursal: row.Sucursal, ...(multiMoneda ? { Moneda: row.Moneda } : {}), Cuenta: row.Cuenta, CuentaDescripcion: row.CuentaDescripcion, Monto: 0 });
     }
     agrupado.get(key).Monto += row.Monto;
   });
 
-  const rows = [...agrupado.values()].sort((a, b) => a.Sucursal.localeCompare(b.Sucursal) || a.Cuenta.localeCompare(b.Cuenta));
+  const rows = [...agrupado.values()].sort((a, b) => a.Sucursal.localeCompare(b.Sucursal) || a.Cuenta.localeCompare(b.Cuenta) || (multiMoneda ? a.Moneda.localeCompare(b.Moneda) : 0));
 
-  const totalGeneral = rows.reduce((acc, row) => acc + row.Monto, 0);
+  let totalGeneral, totalesPorMoneda;
+  if (multiMoneda) {
+    const porMoneda = new Map();
+    rows.forEach((row) => {
+      porMoneda.set(row.Moneda, (porMoneda.get(row.Moneda) || 0) + row.Monto);
+    });
+    totalesPorMoneda = [...porMoneda.entries()].map(([Moneda, totalGeneral]) => ({ Moneda, totalGeneral })).sort((a, b) => a.Moneda.localeCompare(b.Moneda));
+  } else {
+    totalGeneral = rows.reduce((acc, row) => acc + row.Monto, 0);
+  }
 
   return {
     totalCount,
     truncated: totalCount > MAX_ROWS,
     base: baseVisible,
-    baseColumns: ['Sucursal', 'Comprobante', 'Cuenta', 'CuentaDescripcion', 'Monto'],
+    baseColumns: multiMoneda ? ['Sucursal', 'Moneda', 'Comprobante', 'Cuenta', 'CuentaDescripcion', 'Monto'] : ['Sucursal', 'Comprobante', 'Cuenta', 'CuentaDescripcion', 'Monto'],
     rows,
-    columns: ['Sucursal', 'Cuenta', 'CuentaDescripcion', 'Monto'],
-    totalGeneral,
+    columns: multiMoneda ? ['Sucursal', 'Moneda', 'Cuenta', 'CuentaDescripcion', 'Monto'] : ['Sucursal', 'Cuenta', 'CuentaDescripcion', 'Monto'],
+    ...(multiMoneda ? { totalesPorMoneda } : { totalGeneral }),
   };
 };
 

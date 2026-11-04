@@ -19,6 +19,13 @@
 //   - organizacion = "BAXPA" => acceso completo al emprendimiento BAXPA (PRD06) - también
 //     tiene sucursales cargadas (Santa Fe, Rosario) pero el usuario confirmó lo mismo:
 //     acceso completo para todos por ahora.
+//   - organizacion = "Cylius" => acceso completo al emprendimiento Cylius (PRD07, Uruguay)
+//     - una sola ubicación real (PHONE3 = "URUGUAY" en SOP30200), no hay sucursales que
+//     restringir.
+//   - organizacion = "BAEBSA" => acceso completo al emprendimiento BAEBSA (PRD05, Chile) -
+//     Compras sí tiene zonas reales cargadas (Santiago, Coquimbo en Contabilidad
+//     Analítica), pero el usuario confirmó que por ahora nadie queda restringido a una
+//     sola, igual que Ecosistemas/Ecoportatiles/BAXPA.
 //   - organizacion = "Gerencia" => no está atada a NINGÚN emprendimiento fijo - elige cuál
 //     quiere ver después de loguearse (ver emprendimientoDeSesion/EMPRENDIMIENTOS_DISPONIBLES
 //     más abajo y api/src/routes/authRouter.js -> POST /auth/elegir-emprendimiento).
@@ -39,11 +46,13 @@ const normalizarNombreSucursal = (s) => (s || '')
 const ORGANIZACION_ECOSISTEMAS = 'ECOSISTEMAS PATAGONICOS';
 const ORGANIZACION_ECOPORTATILES = 'ECOPORTATILES';
 const ORGANIZACION_BAXPA = 'BAXPA';
+const ORGANIZACION_CYLIUS = 'CYLIUS';
+const ORGANIZACION_CHILE = 'BAEBSA';
 const ORGANIZACION_GERENCIA = 'GERENCIA';
 
 const esAccesoCompleto = (organizacion) => {
   const valor = normalizarNombreSucursal(organizacion);
-  return valor === '' || valor === 'ECOBAHIA' || valor === ORGANIZACION_ECOSISTEMAS || valor === ORGANIZACION_ECOPORTATILES || valor === ORGANIZACION_BAXPA || valor === ORGANIZACION_GERENCIA;
+  return valor === '' || valor === 'ECOBAHIA' || valor === ORGANIZACION_ECOSISTEMAS || valor === ORGANIZACION_ECOPORTATILES || valor === ORGANIZACION_BAXPA || valor === ORGANIZACION_CYLIUS || valor === ORGANIZACION_CHILE || valor === ORGANIZACION_GERENCIA;
 };
 
 // Sucursal a la que un usuario restringido queda limitado, o null si tiene acceso
@@ -68,6 +77,8 @@ const EMPRENDIMIENTOS_DISPONIBLES = [
   { value: 'ecosistemas', label: 'Ecosistemas Patagónicos' },
   { value: 'ecoportatiles', label: 'Ecoportatiles' },
   { value: 'baxpa', label: 'BAXPA' },
+  { value: 'cylius', label: 'Cylius (Uruguay)' },
+  { value: 'chile', label: 'BAEBSA (Chile)' },
 ];
 
 // Emprendimiento (base de datos de GP) al que pertenece la sesión: 'ecosistemas'/
@@ -82,12 +93,16 @@ const EMPRENDIMIENTO_ECOBAHIA = 'ecobahia';
 const EMPRENDIMIENTO_ECOSISTEMAS = 'ecosistemas';
 const EMPRENDIMIENTO_ECOPORTATILES = 'ecoportatiles';
 const EMPRENDIMIENTO_BAXPA = 'baxpa';
+const EMPRENDIMIENTO_CYLIUS = 'cylius';
+const EMPRENDIMIENTO_CHILE = 'chile';
 
 const emprendimientoDeSesion = (usuarioSesion) => {
   const valor = normalizarNombreSucursal(usuarioSesion?.organizacion);
   if (valor === ORGANIZACION_ECOSISTEMAS) return EMPRENDIMIENTO_ECOSISTEMAS;
   if (valor === ORGANIZACION_ECOPORTATILES) return EMPRENDIMIENTO_ECOPORTATILES;
   if (valor === ORGANIZACION_BAXPA) return EMPRENDIMIENTO_BAXPA;
+  if (valor === ORGANIZACION_CYLIUS) return EMPRENDIMIENTO_CYLIUS;
+  if (valor === ORGANIZACION_CHILE) return EMPRENDIMIENTO_CHILE;
   if (valor === ORGANIZACION_GERENCIA) {
     const elegido = usuarioSesion?.emprendimientoElegido;
     return EMPRENDIMIENTOS_DISPONIBLES.some((e) => e.value === elegido) ? elegido : null;
@@ -111,7 +126,7 @@ const coincideSucursal = (valorGP, sucursalUsuario) => {
 // del desarrollador) siempre puede entrar, tenga o no company cargado.
 const ORGANIZACIONES_CON_ACCESO = [
   'ECOBAHIA', 'TANDIL', 'LA PAMPA', 'BAHIA BLANCA', 'MAR DEL PLATA', 'PUERTO MADRYN',
-  ORGANIZACION_ECOSISTEMAS, ORGANIZACION_ECOPORTATILES, ORGANIZACION_BAXPA, ORGANIZACION_GERENCIA,
+  ORGANIZACION_ECOSISTEMAS, ORGANIZACION_ECOPORTATILES, ORGANIZACION_BAXPA, ORGANIZACION_CYLIUS, ORGANIZACION_CHILE, ORGANIZACION_GERENCIA,
 ];
 const USUARIOS_CON_ACCESO_SIEMPRE = ['broscheitcb'];
 

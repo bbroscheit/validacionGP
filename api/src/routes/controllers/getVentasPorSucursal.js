@@ -1,4 +1,4 @@
-const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolSist2, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolCylius, getGpPoolChile, getGpPoolSist2, sql } = require('../../config/gpPool');
 const {
   resolverSucursalSist2,
   CLIENTE_SUCURSAL_JOIN_SIST2,
@@ -8,7 +8,7 @@ const {
 const { getOverridesMap } = require('../../services/clasificacionOverrides');
 const { coincideSucursal } = require('../../services/autorizacion');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, sist2: getGpPoolSist2 };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, cylius: getGpPoolCylius, chile: getGpPoolChile, sist2: getGpPoolSist2 };
 
 // Reporte 1 - Ventas por sucursal
 // Ecobahia: agrupa SOP30200 por PHONE3 (la columna real de sucursal - no LOCNCODE, que es
@@ -41,6 +41,14 @@ const getVentasPorSucursal = async ({ fechaDesde, fechaHasta, soloConP = true, e
   if (!getPool) throw new Error(`Empresa desconocida: "${empresa}"`);
   const pool = await getPool();
   const soloConPBool = soloConP === false || soloConP === 'false' ? false : true;
+
+  // Cylius factura en más de una moneda (UYU/USD) sin tabla de tipo de cambio en la base
+  // - sumar Neto/Impuestos de comprobantes en monedas distintas da un número sin sentido
+  // (dólares + pesos uruguayos como si fueran lo mismo). Por eso ahí se agrupa también por
+  // CURNCYID y se devuelve un total por moneda en vez de un total único. El resto de los
+  // emprendimientos (una sola moneda) sigue exactamente igual que antes.
+  const multiMoneda = empresa === 'cylius';
+  const monedaSelect = multiMoneda ? ', LTRIM(RTRIM(H.CURNCYID)) AS Moneda' : '';
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
@@ -76,7 +84,7 @@ const getVentasPorSucursal = async ({ fechaDesde, fechaHasta, soloConP = true, e
         LTRIM(RTRIM(NC.CUSTNAME)) AS NombreCliente,
         ISNULL(H.SUBTOTAL, 0) AS SUBTOTAL,
         ISNULL(H.TAXAMNT, 0) AS TAXAMNT,
-        ISNULL(H.BCKTXAMT, 0) AS BCKTXAMT${clienteSucursalSelect}
+        ISNULL(H.BCKTXAMT, 0) AS BCKTXAMT${clienteSucursalSelect}${monedaSelect}
       FROM SOP30200 AS H
       LEFT JOIN RM00101 AS NC ON NC.CUSTNMBR = H.CUSTNMBR
       ${clienteSucursalJoin}
@@ -100,6 +108,7 @@ const getVentasPorSucursal = async ({ fechaDesde, fechaHasta, soloConP = true, e
     const override = overridesMap.get(row.Comprobante);
     return {
       Sucursal: override || sucursalCalculada || MONEDA_VACIA,
+      ...(multiMoneda ? { Moneda: row.Moneda || MONEDA_VACIA } : {}),
       Comprobante: row.Comprobante,
       DOCDATE: row.DOCDATE,
       Cliente: row.Cliente,
@@ -118,36 +127,54 @@ const getVentasPorSucursal = async ({ fechaDesde, fechaHasta, soloConP = true, e
     ? base.filter((row) => coincideSucursal(row.Sucursal, sucursalRestringida))
     : base;
 
+  const claveDe = (row) => (multiMoneda ? `${row.Sucursal}__${row.Moneda}` : row.Sucursal);
+
   const agrupado = new Map();
   baseVisible.forEach((row) => {
-    if (!agrupado.has(row.Sucursal)) {
-      agrupado.set(row.Sucursal, { Sucursal: row.Sucursal, CantidadComprobantes: 0, Neto: 0, Impuestos: 0, Total: 0 });
+    const clave = claveDe(row);
+    if (!agrupado.has(clave)) {
+      agrupado.set(clave, { Sucursal: row.Sucursal, ...(multiMoneda ? { Moneda: row.Moneda } : {}), CantidadComprobantes: 0, Neto: 0, Impuestos: 0, Total: 0 });
     }
-    const grupo = agrupado.get(row.Sucursal);
+    const grupo = agrupado.get(clave);
     grupo.CantidadComprobantes += 1;
     grupo.Neto += row.Neto;
     grupo.Impuestos += row.Impuestos;
     grupo.Total += row.Total;
   });
 
-  const rows = [...agrupado.values()].sort((a, b) => a.Sucursal.localeCompare(b.Sucursal));
+  const rows = [...agrupado.values()].sort((a, b) => a.Sucursal.localeCompare(b.Sucursal) || (multiMoneda ? a.Moneda.localeCompare(b.Moneda) : 0));
 
-  const totalComprobantes = rows.reduce((acc, row) => acc + row.CantidadComprobantes, 0);
-  const totalNeto = rows.reduce((acc, row) => acc + row.Neto, 0);
-  const totalImpuestos = rows.reduce((acc, row) => acc + row.Impuestos, 0);
-  const totalGeneral = totalNeto + totalImpuestos;
+  let totalComprobantes, totalNeto, totalImpuestos, totalGeneral, totalesPorMoneda;
+  if (multiMoneda) {
+    const porMoneda = new Map();
+    rows.forEach((row) => {
+      if (!porMoneda.has(row.Moneda)) porMoneda.set(row.Moneda, { Moneda: row.Moneda, totalComprobantes: 0, totalNeto: 0, totalImpuestos: 0, totalGeneral: 0 });
+      const t = porMoneda.get(row.Moneda);
+      t.totalComprobantes += row.CantidadComprobantes;
+      t.totalNeto += row.Neto;
+      t.totalImpuestos += row.Impuestos;
+      t.totalGeneral += row.Total;
+    });
+    totalesPorMoneda = [...porMoneda.values()].sort((a, b) => a.Moneda.localeCompare(b.Moneda));
+  } else {
+    totalComprobantes = rows.reduce((acc, row) => acc + row.CantidadComprobantes, 0);
+    totalNeto = rows.reduce((acc, row) => acc + row.Neto, 0);
+    totalImpuestos = rows.reduce((acc, row) => acc + row.Impuestos, 0);
+    totalGeneral = totalNeto + totalImpuestos;
+  }
 
   return {
     totalCount,
     truncated: totalCount > MAX_ROWS,
     base: baseVisible,
-    baseColumns: ['Sucursal', 'Comprobante', 'DOCDATE', 'Cliente', 'NombreCliente', 'Editado', 'Neto', 'Impuestos', 'Total'],
+    baseColumns: multiMoneda
+      ? ['Sucursal', 'Moneda', 'Comprobante', 'DOCDATE', 'Cliente', 'NombreCliente', 'Editado', 'Neto', 'Impuestos', 'Total']
+      : ['Sucursal', 'Comprobante', 'DOCDATE', 'Cliente', 'NombreCliente', 'Editado', 'Neto', 'Impuestos', 'Total'],
     rows,
-    columns: ['Sucursal', 'CantidadComprobantes', 'Neto', 'Impuestos', 'Total'],
-    totalComprobantes,
-    totalNeto,
-    totalImpuestos,
-    totalGeneral,
+    columns: multiMoneda
+      ? ['Sucursal', 'Moneda', 'CantidadComprobantes', 'Neto', 'Impuestos', 'Total']
+      : ['Sucursal', 'CantidadComprobantes', 'Neto', 'Impuestos', 'Total'],
+    ...(multiMoneda ? { totalesPorMoneda } : { totalComprobantes, totalNeto, totalImpuestos, totalGeneral }),
   };
 };
 

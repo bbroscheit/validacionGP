@@ -1,8 +1,8 @@
-const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolCylius, getGpPoolChile, sql } = require('../../config/gpPool');
 const { coincideSucursal } = require('../../services/autorizacion');
 const { getOverridesMap } = require('../../services/clasificacionOverrides');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, cylius: getGpPoolCylius, chile: getGpPoolChile };
 
 // Reporte - Compras por sucursal (zona de Contabilidad Analítica)
 // A diferencia de Ventas, las compras (PM10000/PM20000/PM30200) no tienen un campo de
@@ -95,6 +95,23 @@ const CONFIG_EMPRESA = {
     cuentasContrapartida: ['211101', '213224', '213225', '213226'],
     accatnumImpuestos: 49,
     accatnumBancos: 26,
+  },
+  // BAEBSA (Chile, PRD05): confirmado contra el asiento real de Compras (GL20000,
+  // SOURCDOC PMTRX/PMVVR) de los últimos ~2.5 años. La cuenta de contrapartida principal
+  // es "Proveedores Nacionales" (211110-01-000, categoría 13 "Cuentas por pagar" - 2669
+  // filas, prácticamente todo crédito: $1.326M vs $37M débito). La segunda es "Tarjeta a
+  // Pagar" (212110-01-000, categoría 230 "Deudas Bancarias y Financieras" - 265 filas,
+  // 100% crédito, $58M) - mismo patrón que la tarjeta de Ecobahia/BAXPA. Créditos
+  // Fiscales = categoría 135 ("Otros Créditos Corrientes - Créditos Fiscales", cuenta
+  // única "I.V.A. Credito Fiscal 19%" 114650-01-000, 2302 filas). La categoría 100
+  // ("Disponibilidades - Bancos Moneda Nacional") no tiene movimiento real de Compras (4
+  // filas, montos despreciables) - se deja igual por ser la categoría semánticamente
+  // correcta, el trabajo real de excluir la contrapartida de pago ya lo hacen las 2
+  // cuentas puntuales de arriba.
+  chile: {
+    cuentasContrapartida: ['211110-01-000', '212110-01-000'],
+    accatnumImpuestos: 135,
+    accatnumBancos: 100,
   },
 };
 const MAX_ROWS = 100000;
