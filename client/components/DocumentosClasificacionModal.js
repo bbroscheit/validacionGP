@@ -123,7 +123,7 @@ export default function DocumentosClasificacionModal({
               {documentos.map((row, i) => (
                 <tr key={row.Comprobante} className={i % 2 ? "" : "bg-gray-50/60"}>
                   <td className="px-4 py-2 border-b border-[var(--color-border)]">{row.Comprobante}</td>
-                  <td className="px-4 py-2 border-b border-[var(--color-border)]">{row.DOCDATE ? new Date(row.DOCDATE).toLocaleDateString("es-AR") : ""}</td>
+                  <td className="px-4 py-2 border-b border-[var(--color-border)]">{row.DOCDATE ? new Date(row.DOCDATE).toLocaleDateString("es-AR", { timeZone: "UTC" }) : ""}</td>
                   <td className="px-4 py-2 border-b border-[var(--color-border)]">{row.Cliente}</td>
                   <td className="px-4 py-2 border-b border-[var(--color-border)]">{row.NombreCliente}</td>
                   <td className="px-4 py-2 border-b border-[var(--color-border)]">
