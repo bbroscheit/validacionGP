@@ -48,6 +48,7 @@ export default function VentasPorProvincia() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [provinciaSeleccionada, setProvinciaSeleccionada] = useState(null);
+  const [monedaSeleccionada, setMonedaSeleccionada] = useState(null);
 
   const ejecutarBusqueda = async () => {
     setLoading(true);
@@ -146,7 +147,7 @@ export default function VentasPorProvincia() {
                 {data.rows.map((row, i) => (
                   <tr
                     key={`${row.Provincia}-${row.Moneda ?? ""}`}
-                    onClick={() => setProvinciaSeleccionada(row.Provincia)}
+                    onClick={() => { setProvinciaSeleccionada(row.Provincia); setMonedaSeleccionada(row.Moneda ?? null); }}
                     className={`cursor-pointer hover:bg-blue-50 ${i % 2 ? "" : "bg-gray-50/60"}`}
                   >
                     <td className="px-4 py-2 border-b border-[var(--color-border)] text-blue-700 underline">{row.Provincia}</td>
@@ -193,11 +194,11 @@ export default function VentasPorProvincia() {
           tipo="provincia"
           campo="Provincia"
           campoLabel="Provincia"
-          valorGrupo={provinciaSeleccionada}
-          documentos={data.base.filter((row) => row.Provincia === provinciaSeleccionada)}
+          valorGrupo={data.totalesPorMoneda ? `${provinciaSeleccionada} (${monedaSeleccionada})` : provinciaSeleccionada}
+          documentos={data.base.filter((row) => row.Provincia === provinciaSeleccionada && (!data.totalesPorMoneda || row.Moneda === monedaSeleccionada))}
           sugerencias={PROVINCIAS_ARGENTINA}
           modoSeleccion="lista"
-          onClose={() => setProvinciaSeleccionada(null)}
+          onClose={() => { setProvinciaSeleccionada(null); setMonedaSeleccionada(null); }}
           onGuardado={ejecutarBusqueda}
         />
       )}

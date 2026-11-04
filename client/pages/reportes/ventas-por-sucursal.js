@@ -21,6 +21,7 @@ export default function VentasPorSucursal() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [sucursalSeleccionada, setSucursalSeleccionada] = useState(null);
+  const [monedaSeleccionada, setMonedaSeleccionada] = useState(null);
 
   const ejecutarBusqueda = async () => {
     setLoading(true);
@@ -119,7 +120,7 @@ export default function VentasPorSucursal() {
                 {data.rows.map((row, i) => (
                   <tr
                     key={`${row.Sucursal}-${row.Moneda ?? ""}`}
-                    onClick={() => setSucursalSeleccionada(row.Sucursal)}
+                    onClick={() => { setSucursalSeleccionada(row.Sucursal); setMonedaSeleccionada(row.Moneda ?? null); }}
                     className={`cursor-pointer hover:bg-blue-50 ${i % 2 ? "" : "bg-gray-50/60"}`}
                   >
                     <td className="px-4 py-2 border-b border-[var(--color-border)] text-blue-700 underline">{row.Sucursal}</td>
@@ -166,10 +167,10 @@ export default function VentasPorSucursal() {
           tipo="sucursal"
           campo="Sucursal"
           campoLabel="Sucursal"
-          valorGrupo={sucursalSeleccionada}
-          documentos={data.base.filter((row) => row.Sucursal === sucursalSeleccionada)}
+          valorGrupo={data.totalesPorMoneda ? `${sucursalSeleccionada} (${monedaSeleccionada})` : sucursalSeleccionada}
+          documentos={data.base.filter((row) => row.Sucursal === sucursalSeleccionada && (!data.totalesPorMoneda || row.Moneda === monedaSeleccionada))}
           sugerencias={data.rows.map((r) => r.Sucursal).filter((v) => v !== "En Blanco")}
-          onClose={() => setSucursalSeleccionada(null)}
+          onClose={() => { setSucursalSeleccionada(null); setMonedaSeleccionada(null); }}
           onGuardado={ejecutarBusqueda}
         />
       )}
