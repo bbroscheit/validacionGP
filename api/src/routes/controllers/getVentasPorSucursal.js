@@ -14,8 +14,12 @@ const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, 
 // Ecobahia: agrupa SOP30200 por PHONE3 (la columna real de sucursal - no LOCNCODE, que es
 // la que usa el endpoint base /ventas como filtro).
 // sist2: PHONE3 solo no alcanza (casi siempre vacío) - se resuelve con las 3 fuentes de
-// services/sist2Ventas.js (PHONE3 -> DOCID -> ficha del cliente), y el signo se decide
-// por SOPTYPE en vez del prefijo NC (ver ese mismo módulo para el detalle).
+// services/sist2Ventas.js (PHONE3 -> DOCID -> ficha del cliente).
+// El signo (nota de crédito = negativo) se decide con H.SOPTYPE = 4 (esNotaCreditoSist2,
+// a pesar del nombre vale para cualquier emprendimiento) y no por el prefijo "NC" del
+// comprobante: Chile (BAEBSA) numera sus notas de crédito "61P-...", no "NC...", y quedaban
+// sumando en vez de restando - confirmado que SOPTYPE=4 coincide 1 a 1 con el prefijo "NC"
+// en los demás emprendimientos (donde sí lo usan) y además cubre a Chile.
 // Igual que en getVentas.js: TAXAMNT trae el IVA en Factura A (BCKTXAMT da 0) y en
 // Factura B es al revés (precio con impuesto incluido, el IVA "desagregado" está en
 // BCKTXAMT y TAXAMNT da 0). Por eso:
@@ -98,7 +102,7 @@ const getVentasPorSucursal = async ({ fechaDesde, fechaHasta, soloConP = true, e
   ]);
 
   const base = detalle.recordset.map((row) => {
-    const signo = (empresa === 'sist2' ? esNotaCreditoSist2(row.SOPTYPE) : row.Comprobante.startsWith('NC')) ? -1 : 1;
+    const signo = esNotaCreditoSist2(row.SOPTYPE) ? -1 : 1;
     const neto = signo * (row.SUBTOTAL - row.BCKTXAMT);
     const impuestos = signo * (row.TAXAMNT + row.BCKTXAMT);
     const sucursalCalculada = empresa === 'sist2'

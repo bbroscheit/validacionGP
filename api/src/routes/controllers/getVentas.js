@@ -217,9 +217,14 @@ const getVentas = async ({ sucursal, fechaDesde, fechaHasta, soloConP = true, em
   // contabilización: en sist2 solo aparecen los valores 3 (Factura) y 4 (Devolución/nota
   // de crédito) - no hay Notas de Débito como SOPTYPE aparte, van con SOPTYPE=3 igual
   // que una factura (correcto: una ND también suma, no resta).
-  const esNotaCredito = (row) => (empresa === 'sist2'
-    ? esNotaCreditoSist2(row.SOPTYPE)
-    : String(row.SOPNUMBE).trim().startsWith('NC'));
+  // Mismo criterio para el resto de los emprendimientos (ya no solo sist2): se detectaba
+  // por el prefijo "NC" del comprobante, pero eso es una convención de numeración de
+  // Argentina/Cylius - en Chile (BAEBSA) las notas de crédito arrancan "61P-" en vez de
+  // "NC", así que quedaban sumando en vez de restando. Confirmado contra PRD05/PRD08/
+  // PRD02/PRD09/PRD06/PRD07 reales: SOPTYPE=4 coincide 1 a 1 con el prefijo "NC" en los 5
+  // que sí lo usan, y además cubre a Chile, que no lo usa - esNotaCreditoSist2 ya hacía
+  // exactamente esta comparación (soptype === 4), se puede usar para todos.
+  const esNotaCredito = (row) => esNotaCreditoSist2(row.SOPTYPE);
 
   const headerRows = header.recordset.map((row) => {
     const signo = esNotaCredito(row) ? -1 : 1;

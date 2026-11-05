@@ -1,15 +1,17 @@
 const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolCylius, getGpPoolChile, sql } = require('../../config/gpPool');
 const { getOverridesMap } = require('../../services/clasificacionOverrides');
+const { esNotaCreditoSist2 } = require('../../services/sist2Ventas');
 
 const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, cylius: getGpPoolCylius, chile: getGpPoolChile };
 
 // Reporte - Ventas por provincia: igual que Ventas por sucursal, pero agrupa SOP30200 por
 // STATE (provincia de la ficha del cliente/comprobante) en vez de PHONE3. Misma lógica de
-// Neto/Impuestos/Total y mismo signo invertido en notas de crédito - ver
-// getVentasPorSucursal.js para el detalle de esas cuentas (incluida la nota sobre por qué
-// Cylius no necesita separar por moneda: SUBTOTAL/TAXAMNT/BCKTXAMT ya vienen en la moneda
-// funcional UYU). No existe para sist2 (bloqueado en el router), pero sí aplica a
-// Ecosistemas Patagónicos igual que Ecobahia.
+// Neto/Impuestos/Total y mismo signo invertido en notas de crédito (H.SOPTYPE = 4, no el
+// prefijo "NC" del comprobante - Chile numera sus NC "61P-...", ver getVentasPorSucursal.js
+// para el detalle) - ver también la nota sobre por qué Cylius no necesita separar por
+// moneda: SUBTOTAL/TAXAMNT/BCKTXAMT ya vienen en la moneda funcional UYU. No existe para
+// sist2 (bloqueado en el router), pero sí aplica a Ecosistemas Patagónicos igual que
+// Ecobahia.
 const MONEDA_VACIA = 'En Blanco';
 const MAX_ROWS = 100000;
 
@@ -65,7 +67,7 @@ const getVentasPorProvincia = async ({ fechaDesde, fechaHasta, soloConP = true, 
   ]);
 
   const base = detalle.recordset.map((row) => {
-    const signo = row.Comprobante.startsWith('NC') ? -1 : 1;
+    const signo = esNotaCreditoSist2(row.SOPTYPE) ? -1 : 1;
     const neto = signo * (row.SUBTOTAL - row.BCKTXAMT);
     const impuestos = signo * (row.TAXAMNT + row.BCKTXAMT);
     // STATE viene con mayúsculas/minúsculas inconsistentes en GP ("Buenos Aires",
