@@ -1,4 +1,5 @@
 const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, sql } = require('../../config/gpPool');
+const { bindInList } = require('../../services/sist2Ventas');
 
 const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa };
 
@@ -18,8 +19,9 @@ const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, 
 // general de julio no cambia (473.560.303,27 en ambos casos, ver más abajo).
 // Se llega al cliente cruzando G.ORDOCNUM contra SOP30200.SOPNUMBE, igual que en
 // getVentasPorSucursalCuenta.js.
-// Se excluyen dos cosas nada más: la cuenta de deudores por ventas (113110-01-000, la
-// contrapartida de cobro) y las cuentas de impuestos (A.ACCATNUM = 30 - categoría de
+// Se excluyen dos cosas nada más: las cuentas que actúan como contrapartida de cobro
+// (deudores por ventas y, cuando aplica, cuentas de cobro directo/reclasificación - ver
+// detalle de BAXPA abajo) y las cuentas de impuestos (A.ACCATNUM = 30 - categoría de
 // cuenta de GP que agrupa TODAS las cuentas de IVA/IIBB/retenciones, no solo las 3 más
 // usadas). Probamos primero filtrar por A.PSTNGTYP = 1 (Estado de Resultados) pero eso
 // también sacaba las cuentas "V.A." (123xxx, activo) que sí tienen que quedar - el saldo
@@ -38,12 +40,22 @@ const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, 
 // "-01-000" en los números de cuenta acá): categoría 17 = "Cargas Fiscales - A.F.I.P a
 // Pagar" (incluye "IVA-DEBITO F.21% Y 19%"), cuenta 113110 = "DEUDORES POR VENTAS" (mismo
 // número que Ecobahia, sin el sufijo).
+//
+// BAXPA tiene además otras 3 cuentas que actúan de contrapartida sin ser Deudores -
+// confirmado contra el detalle real de GL20000 (SOURCDOC='SJ') de cada una: 111153
+// "MERCADO PAGO" (cobro directo sin pasar por Deudores - 4 comprobantes reales), 111155
+// "COMPENSACION CLIENTE/PROVEEDOR" (reclasificación de saldo, siempre en el mismo
+// asiento que un débito a 113110, sin ninguna línea de ingreso/impuesto - 4 Notas de
+// Débito internas), 113116 "CHEQUES RECHAZADOS" (reclasifica el saldo de Deudores a esta
+// cuenta cuando rechazan un cheque - mayor impacto encontrado, +14,3M acumulado) y 111321
+// "BANCO FRANCES C/C5804/2" (mismo patrón, 1 comprobante). Ninguna es un ingreso nuevo;
+// sin excluirlas, cada una se sumaba/restaba como si fuera una venta real.
 const MONEDA_VACIA = 'En Blanco';
 const CONFIG_EMPRESA = {
-  ecobahia: { cuentaDeudores: '113110-01-000', accatnumImpuestos: 30 },
-  ecosistemas: { cuentaDeudores: '112110-02-000', accatnumImpuestos: 13 },
-  ecoportatiles: { cuentaDeudores: '113110-01-000', accatnumImpuestos: 27 },
-  baxpa: { cuentaDeudores: '113110', accatnumImpuestos: 17 },
+  ecobahia: { cuentasContrapartida: ['113110-01-000'], accatnumImpuestos: 30 },
+  ecosistemas: { cuentasContrapartida: ['112110-02-000'], accatnumImpuestos: 13 },
+  ecoportatiles: { cuentasContrapartida: ['113110-01-000'], accatnumImpuestos: 27 },
+  baxpa: { cuentasContrapartida: ['113110', '111153', '111155', '113116', '111321'], accatnumImpuestos: 17 },
 };
 const MAX_ROWS = 100000;
 
@@ -54,18 +66,18 @@ const getVentasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta, solo
 
   const pool = await POOLS[empresa]();
   const soloConPBool = soloConP === false || soloConP === 'false' ? false : true;
-  const { cuentaDeudores: CUENTA_DEUDORES, accatnumImpuestos: ACCATNUM_IMPUESTOS } = CONFIG_EMPRESA[empresa];
+  const { cuentasContrapartida: CUENTAS_CONTRAPARTIDA, accatnumImpuestos: ACCATNUM_IMPUESTOS } = CONFIG_EMPRESA[empresa];
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
     request.input('fechaHasta', sql.DateTime, new Date(fechaHasta));
     request.input('soloConP', sql.Bit, soloConPBool);
-    request.input('cuentaDeudores', sql.VarChar(75), CUENTA_DEUDORES);
     request.input('accatnumImpuestos', sql.Int, ACCATNUM_IMPUESTOS);
     return request;
   };
 
   const countRequest = bindFilters(pool.request());
+  const contrapartidaListCount = bindInList(countRequest, 'cuentaContrapartida', CUENTAS_CONTRAPARTIDA);
   const count = await countRequest.query(`
     SELECT COUNT(*) AS total
     FROM GL20000 AS G
@@ -75,13 +87,14 @@ const getVentasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta, solo
       LTRIM(RTRIM(G.SOURCDOC)) = 'SJ'
       AND G.TRXDATE >= @fechaDesde
       AND G.TRXDATE <= @fechaHasta
-      AND LTRIM(RTRIM(N.ACTNUMST)) <> @cuentaDeudores
+      AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (${contrapartidaListCount})
       AND A.ACCATNUM <> @accatnumImpuestos
       AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%')
   `);
   const totalCount = count.recordset[0].total;
 
   const detalleRequest = bindFilters(pool.request());
+  const contrapartidaListDetalle = bindInList(detalleRequest, 'cuentaContrapartida', CUENTAS_CONTRAPARTIDA);
   const detalle = await detalleRequest.query(`
     SELECT TOP (${MAX_ROWS})
       NULLIF(LTRIM(RTRIM(A.USERDEF2)), '') AS Categoria,
@@ -101,7 +114,7 @@ const getVentasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta, solo
       LTRIM(RTRIM(G.SOURCDOC)) = 'SJ'
       AND G.TRXDATE >= @fechaDesde
       AND G.TRXDATE <= @fechaHasta
-      AND LTRIM(RTRIM(N.ACTNUMST)) <> @cuentaDeudores
+      AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (${contrapartidaListDetalle})
       AND A.ACCATNUM <> @accatnumImpuestos
       AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%')
     ORDER BY Categoria ASC

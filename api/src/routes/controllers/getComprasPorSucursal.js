@@ -87,12 +87,24 @@ const CONFIG_EMPRESA = {
     accatnumBancos: 22,
   },
   ecoportatiles: {
-    cuentasContrapartida: ['211101-01-000'],
+    // 111110-01-000 "CAJA" (categoría 19): mismo caso que BAXPA más abajo - a veces se
+    // paga la factura "en el mismo documento" con caja en vez de generar una orden de
+    // pago aparte contra Proveedores. Confirmado contra PRD09: 18 comprobantes reales
+    // (ej. FC A0001-00002669, FC C2000-00004715), categoría 19 100% contrapartida (sin
+    // ninguna cuenta de gasto real mezclada, $486.631,52 siempre en el lado crédito).
+    cuentasContrapartida: ['211101-01-000', '111110-01-000'],
     accatnumImpuestos: 9,
     accatnumBancos: 20,
   },
   baxpa: {
-    cuentasContrapartida: ['211101', '213224', '213225', '213226'],
+    // 111118/111130 "FONDO FIJO..." (categoría 28, "Fondo Fijo"): mismo caso que CAJA en
+    // Ecoportatiles - a veces se paga con el fondo fijo de una sucursal en vez de generar
+    // una orden de pago contra Proveedores. Confirmado contra PRD06: ej. FC A5423-00003246
+    // (Fondo Fijo Playa) y FC A0061-00027961 (Fondo Fijo Diego Lopez) - sin excluirlas, el
+    // Neto del comprobante quedaba negativo (la línea de gasto real quedaba más chica que
+    // la contrapartida, que no debería contar). Categoría 28 tiene solo estas 2 cuentas,
+    // 100% contrapartida (debito casi nulo, $1.119,81 de redondeos en 497 comprobantes).
+    cuentasContrapartida: ['211101', '213224', '213225', '213226', '111118', '111130'],
     accatnumImpuestos: 49,
     accatnumBancos: 26,
   },
