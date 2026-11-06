@@ -1,6 +1,6 @@
-const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolCylius, getGpPoolChile, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolCylius, getGpPoolChile, getGpPoolBasani, sql } = require('../../config/gpPool');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, cylius: getGpPoolCylius, chile: getGpPoolChile };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, cylius: getGpPoolCylius, chile: getGpPoolChile, basani: getGpPoolBasani };
 
 // Reporte - Cuenta corriente de proveedor (los 4 emprendimientos, menú "Compras").
 // A diferencia de Clientes (RM20101 sola alcanza - ver getCuentaCorrienteCliente.js),

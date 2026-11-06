@@ -1,8 +1,9 @@
-const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolCylius, getGpPoolChile, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolCylius, getGpPoolChile, getGpPoolBasani, sql } = require('../../config/gpPool');
 const { coincideSucursal } = require('../../services/autorizacion');
 const { getOverridesMap } = require('../../services/clasificacionOverrides');
+const { condicionNotIn } = require('../../services/sist2Ventas');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, cylius: getGpPoolCylius, chile: getGpPoolChile };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, cylius: getGpPoolCylius, chile: getGpPoolChile, basani: getGpPoolBasani };
 
 // Reporte - Compras por sucursal (zona de Contabilidad Analítica)
 // A diferencia de Ventas, las compras (PM10000/PM20000/PM30200) no tienen un campo de
@@ -78,13 +79,13 @@ const MONEDA_VACIA = 'En Blanco';
 const CONFIG_EMPRESA = {
   ecobahia: {
     cuentasContrapartida: ['211101-01-000', '223202-01-000'],
-    accatnumImpuestos: 9,
-    accatnumBancos: 22,
+    accatnumImpuestos: [9],
+    accatnumContrapartida: [22],
   },
   ecosistemas: {
     cuentasContrapartida: ['211110-01-000', '211210-01-000'],
-    accatnumImpuestos: 37,
-    accatnumBancos: 22,
+    accatnumImpuestos: [37],
+    accatnumContrapartida: [22],
   },
   ecoportatiles: {
     // 111110-01-000 "CAJA" (categoría 19): mismo caso que BAXPA más abajo - a veces se
@@ -93,8 +94,8 @@ const CONFIG_EMPRESA = {
     // (ej. FC A0001-00002669, FC C2000-00004715), categoría 19 100% contrapartida (sin
     // ninguna cuenta de gasto real mezclada, $486.631,52 siempre en el lado crédito).
     cuentasContrapartida: ['211101-01-000', '111110-01-000'],
-    accatnumImpuestos: 9,
-    accatnumBancos: 20,
+    accatnumImpuestos: [9],
+    accatnumContrapartida: [20],
   },
   baxpa: {
     // 111118/111130 "FONDO FIJO..." (categoría 28, "Fondo Fijo"): mismo caso que CAJA en
@@ -105,8 +106,8 @@ const CONFIG_EMPRESA = {
     // la contrapartida, que no debería contar). Categoría 28 tiene solo estas 2 cuentas,
     // 100% contrapartida (debito casi nulo, $1.119,81 de redondeos en 497 comprobantes).
     cuentasContrapartida: ['211101', '213224', '213225', '213226', '111118', '111130'],
-    accatnumImpuestos: 49,
-    accatnumBancos: 26,
+    accatnumImpuestos: [49],
+    accatnumContrapartida: [26],
   },
   // BAEBSA (Chile, PRD05): confirmado contra el asiento real de Compras (GL20000,
   // SOURCDOC PMTRX/PMVVR) de los últimos ~2.5 años. La cuenta de contrapartida principal
@@ -122,8 +123,8 @@ const CONFIG_EMPRESA = {
   // cuentas puntuales de arriba.
   chile: {
     cuentasContrapartida: ['211110-01-000', '212110-01-000'],
-    accatnumImpuestos: 135,
-    accatnumBancos: 100,
+    accatnumImpuestos: [135],
+    accatnumContrapartida: [100],
   },
   // Cylius (Uruguay, PRD07): confirmado contra el asiento real de Compras (GL20000,
   // SOURCDOC PMTRX/PMVVR), todo el histórico. Contrapartida de pago = "AV-PROVEEDORES
@@ -138,8 +139,33 @@ const CONFIG_EMPRESA = {
   // GL20000 son siempre moneda funcional (UYU) por diseño de GP.
   cylius: {
     cuentasContrapartida: ['211101-01-000'],
-    accatnumImpuestos: 18,
-    accatnumBancos: 3,
+    accatnumImpuestos: [18],
+    accatnumContrapartida: [3],
+  },
+  // Basani (PRD01): plan de cuentas mucho más granular que las otras 6 - la contrapartida
+  // de pago no se concentra en 1-2 cuentas puntuales sino en categorías GP completas,
+  // todas confirmadas 100% contrapartida contra el asiento real de Compras (GL20000,
+  // SOURCDOC PMTRX/PMVVR): 13 "Cuentas por pagar" (Proveedores Nacionales/del Exterior +
+  // AMEX a pagar + planes de facilidades/moratorias impositivas, todas cuentas "a pagar"),
+  // 230 "Deudas Bancarias y Financieras" (Visa BBVA/Santander, Tarjeta Pyme Nación,
+  // Caución Pasiva, Provisión de gastos), 100 "Bancos", 102 "Caja" (incluye Mercado Pago),
+  // 103 "Fondo Fijo" y 104 (Compensación Cliente/Proveedor, Valores a depositar) - mismas
+  // 2 últimas que en Ventas (ver getVentasPorCategoriaContribuyente.js). También 87
+  // "Deudores Nacionales", que en Compras solo aporta "Cheques rechazados Proveedor"
+  // (113310, reclasifica Proveedores cuando rechazan un cheque propio - no es una compra
+  // nueva). Créditos Fiscales = categoría 135 (misma cuenta que en Ventas, lado crédito
+  // fiscal) + 73 y 75 (retenciones/percepciones a pagar que aparecen tanto del lado de
+  // Ventas como de Compras, montos chicos pero con el mismo rol de "no es una compra").
+  basani: {
+    cuentasContrapartida: [],
+    accatnumImpuestos: [135, 73, 75],
+    // 1 "Banco Nación cuenta corriente" (+ Cert. Deuda Pcia Bs As + Facturas Negociadas,
+    // ninguna con movimiento real de Compras): es otra categoría de banco aparte de la
+    // 100, mismo rol de contrapartida - confirmado con un pago de préstamo real que
+    // quedaba con Neto negativo sin excluirla (Prestamos Bancarios 212210, categoría 168,
+    // SÍ se deja adentro a propósito, mismo criterio que BAXPA con su categoría de
+    // Préstamos - acá el problema era solo el banco, no el préstamo en sí).
+    accatnumContrapartida: [1, 13, 230, 100, 102, 103, 104, 87],
   },
 };
 const MAX_ROWS = 100000;
@@ -150,14 +176,15 @@ const getComprasPorSucursal = async ({ fechaDesde, fechaHasta, empresa = 'ecobah
   }
 
   const pool = await POOLS[empresa]();
-  const { cuentasContrapartida: CUENTAS_CONTRAPARTIDA, accatnumBancos: ACCATNUM_BANCOS, accatnumImpuestos: ACCATNUM_IMPUESTOS } = CONFIG_EMPRESA[empresa];
-  const cuentaContrapartidaInClause = CUENTAS_CONTRAPARTIDA.map((_, i) => `@cuentaContrapartida${i}`).join(', ');
+  const {
+    cuentasContrapartida: CUENTAS_CONTRAPARTIDA,
+    accatnumContrapartida: ACCATNUM_CONTRAPARTIDA,
+    accatnumImpuestos: ACCATNUM_IMPUESTOS,
+  } = CONFIG_EMPRESA[empresa];
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
     request.input('fechaHasta', sql.DateTime, new Date(fechaHasta));
-    CUENTAS_CONTRAPARTIDA.forEach((cuenta, i) => request.input(`cuentaContrapartida${i}`, sql.VarChar(75), cuenta));
-    request.input('accatnumBancos', sql.Int, ACCATNUM_BANCOS);
     return request;
   };
 
@@ -183,6 +210,8 @@ const getComprasPorSucursal = async ({ fechaDesde, fechaHasta, empresa = 'ecobah
   `;
 
   const countRequest = bindFilters(pool.request());
+  const condCuentaContrapartidaCount = condicionNotIn(countRequest, "LTRIM(RTRIM(N.ACTNUMST))", 'cuentaContrapartida', CUENTAS_CONTRAPARTIDA, sql.VarChar(75));
+  const condAccatnumContrapartidaCount = condicionNotIn(countRequest, 'A.ACCATNUM', 'accatContrapartida', ACCATNUM_CONTRAPARTIDA, sql.Int);
   const count = await countRequest.query(`
     SELECT COUNT(*) AS total
     FROM GL20000 AS G
@@ -192,14 +221,18 @@ const getComprasPorSucursal = async ({ fechaDesde, fechaHasta, empresa = 'ecobah
       LTRIM(RTRIM(G.SOURCDOC)) IN ('PMTRX', 'PMVVR')
       AND G.TRXDATE >= @fechaDesde
       AND G.TRXDATE <= @fechaHasta
-      AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (${cuentaContrapartidaInClause})
-      AND A.ACCATNUM <> @accatnumBancos
+      AND ${condCuentaContrapartidaCount}
+      AND ${condAccatnumContrapartidaCount}
       ${noAnuladaWhere}
   `);
   const totalCount = count.recordset[0].total;
 
+  const detalleRequest = bindFilters(pool.request());
+  const condCuentaContrapartidaDetalle = condicionNotIn(detalleRequest, "LTRIM(RTRIM(N.ACTNUMST))", 'cuentaContrapartida', CUENTAS_CONTRAPARTIDA, sql.VarChar(75));
+  const condAccatnumContrapartidaDetalle = condicionNotIn(detalleRequest, 'A.ACCATNUM', 'accatContrapartida', ACCATNUM_CONTRAPARTIDA, sql.Int);
+
   const [detalle, overridesMap] = await Promise.all([
-    bindFilters(pool.request()).query(`
+    detalleRequest.query(`
       WITH AADetalle AS (
         SELECT
           A.[Entrada de diario] AS JRNENTRY,
@@ -236,8 +269,8 @@ const getComprasPorSucursal = async ({ fechaDesde, fechaHasta, empresa = 'ecobah
         LTRIM(RTRIM(G.SOURCDOC)) IN ('PMTRX', 'PMVVR')
         AND G.TRXDATE >= @fechaDesde
         AND G.TRXDATE <= @fechaHasta
-        AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (${cuentaContrapartidaInClause})
-        AND A.ACCATNUM <> @accatnumBancos
+        AND ${condCuentaContrapartidaDetalle}
+        AND ${condAccatnumContrapartidaDetalle}
         ${noAnuladaWhere}
       ORDER BY Sucursal ASC, G.TRXDATE ASC
     `),
@@ -249,7 +282,7 @@ const getComprasPorSucursal = async ({ fechaDesde, fechaHasta, empresa = 'ecobah
   // Contabilidad Analítica no tiene la dimensión ZONA cargada en un asiento puntual.
   const base = detalle.recordset.map((row) => {
     const monto = (row.DEBITAMT || 0) - (row.CRDTAMNT || 0);
-    const esImpuesto = row.ACCATNUM === ACCATNUM_IMPUESTOS;
+    const esImpuesto = ACCATNUM_IMPUESTOS.includes(row.ACCATNUM);
     const override = overridesMap.get(row.Comprobante);
     return {
       Sucursal: override || row.Sucursal || MONEDA_VACIA,

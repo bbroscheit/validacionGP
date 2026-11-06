@@ -79,6 +79,7 @@ const EMPRENDIMIENTOS_DISPONIBLES = [
   { value: 'baxpa', label: 'BAXPA' },
   { value: 'cylius', label: 'Cylius (Uruguay)' },
   { value: 'chile', label: 'BAEBSA (Chile)' },
+  { value: 'basani', label: 'Basani' },
 ];
 
 // Emprendimiento (base de datos de GP) al que pertenece la sesión: 'ecosistemas'/

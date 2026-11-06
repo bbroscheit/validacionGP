@@ -64,13 +64,22 @@ const SIST2_SUCURSALES = ['Bahía Blanca', 'Casa Central', 'La Pampa', 'Mar del 
 // Arma un "IN (@p0, @p1, ...)" parametrizado para listas de valores de largo variable
 // (mssql no soporta bindear un array directo) - compartido entre los reportes que
 // necesitan cruzar contra listas de comprobantes/clientes (Cobranzas, Cuenta Corriente).
-const bindInList = (request, prefix, values) => values
+const bindInList = (request, prefix, values, type = sql.VarChar(75)) => values
   .map((value, i) => {
     const name = `${prefix}${i}`;
-    request.input(name, sql.VarChar(75), value);
+    request.input(name, type, value);
     return `@${name}`;
   })
   .join(',');
+
+// "columnaSQL NOT IN (...)" parametrizado para listas de largo variable (ACCATNUM,
+// cuentas) - usado para excluir contrapartida/impuestos en los reportes de Ventas y
+// Compras por categoría de cuenta. Con lista vacía (empresa sin ese tipo de exclusión)
+// devuelve una condición siempre verdadera que no depende del tipo de la columna, en vez
+// de "NOT IN ()" (inválido en SQL).
+const condicionNotIn = (request, columnaSQL, prefix, values, type) => (
+  values.length ? `${columnaSQL} NOT IN (${bindInList(request, prefix, values, type)})` : '1 = 1'
+);
 
 module.exports = {
   resolverSucursalSist2,
@@ -79,4 +88,5 @@ module.exports = {
   esNotaCreditoSist2,
   SIST2_SUCURSALES,
   bindInList,
+  condicionNotIn,
 };

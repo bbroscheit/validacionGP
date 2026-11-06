@@ -1,9 +1,9 @@
-const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolCylius, getGpPoolChile, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolCylius, getGpPoolChile, getGpPoolBasani, sql } = require('../../config/gpPool');
 const { coincideSucursal } = require('../../services/autorizacion');
 const { getOverridesMap } = require('../../services/clasificacionOverrides');
 const getSucursalesVentas = require('./getSucursalesVentas.js');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, cylius: getGpPoolCylius, chile: getGpPoolChile };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, cylius: getGpPoolCylius, chile: getGpPoolChile, basani: getGpPoolBasani };
 
 // Reporte - Cuenta corriente de cliente (los 4 emprendimientos, menú "Ventas"). Mismo
 // Port de getCuentaCorrienteSist2.js, simplificado: acá PHONE3 solo ya alcanza para

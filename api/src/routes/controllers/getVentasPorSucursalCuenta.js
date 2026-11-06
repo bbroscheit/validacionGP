@@ -1,9 +1,9 @@
-const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolCylius, getGpPoolChile, getGpPoolSist2, sql } = require('../../config/gpPool');
-const { resolverSucursalSist2, CLIENTE_SUCURSAL_JOIN_SIST2, CLIENTE_SUCURSAL_SELECT_SIST2 } = require('../../services/sist2Ventas');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolCylius, getGpPoolChile, getGpPoolBasani, getGpPoolSist2, sql } = require('../../config/gpPool');
+const { resolverSucursalSist2, CLIENTE_SUCURSAL_JOIN_SIST2, CLIENTE_SUCURSAL_SELECT_SIST2, condicionNotIn } = require('../../services/sist2Ventas');
 const { coincideSucursal } = require('../../services/autorizacion');
 const { getOverridesMap } = require('../../services/clasificacionOverrides');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, cylius: getGpPoolCylius, chile: getGpPoolChile, sist2: getGpPoolSist2 };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, cylius: getGpPoolCylius, chile: getGpPoolChile, basani: getGpPoolBasani, sist2: getGpPoolSist2 };
 
 // Reporte - Ventas por sucursal y cuenta contable
 // GL20000 filtrado por SOURCDOC = 'SJ' (asientos generados por el módulo de ventas,
@@ -38,13 +38,22 @@ const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, 
 // (pestaña "Base" + pestaña "Resultado") es una suma verificable línea por línea.
 const MONEDA_VACIA = 'En Blanco';
 const CUENTA_DEUDORES_POR_EMPRESA = {
-  ecobahia: '113110-01-000',
-  ecosistemas: '112110-02-000',
-  ecoportatiles: '113110-01-000',
-  baxpa: '113110',
-  cylius: '113110-01-000',
-  chile: '113110-01-000',
-  sist2: '113110-01-000',
+  ecobahia: ['113110-01-000'],
+  ecosistemas: ['112110-02-000'],
+  ecoportatiles: ['113110-01-000'],
+  baxpa: ['113110'],
+  cylius: ['113110-01-000'],
+  chile: ['113110-01-000'],
+  sist2: ['113110-01-000'],
+  // Basani (PRD01): ver detalle completo en getVentasPorCategoriaContribuyente.js - la
+  // contrapartida de Deudores acá no es una sola cuenta sino 4 categorías de GP completas
+  // (87 Deudores Nacionales, 86 Deudores del Exterior, 100 Bancos, 104 Compensación/
+  // Cheques Rechazados/Valores a depositar), confirmadas 100% contrapartida contra GL20000
+  // (SOURCDOC='SJ') real.
+  basani: [],
+};
+const ACCATNUM_CONTRAPARTIDA_POR_EMPRESA = {
+  basani: [86, 87, 100, 102, 104],
 };
 const MAX_ROWS = 100000;
 
@@ -57,26 +66,30 @@ const getVentasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, soloConP = t
   if (!getPool) throw new Error(`Empresa desconocida: "${empresa}"`);
   const pool = await getPool();
   const soloConPBool = soloConP === false || soloConP === 'false' ? false : true;
-  const cuentaDeudores = CUENTA_DEUDORES_POR_EMPRESA[empresa];
+  const cuentasDeudores = CUENTA_DEUDORES_POR_EMPRESA[empresa];
+  const accatnumContrapartida = ACCATNUM_CONTRAPARTIDA_POR_EMPRESA[empresa] || [];
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
     request.input('fechaHasta', sql.DateTime, new Date(fechaHasta));
     request.input('soloConP', sql.Bit, soloConPBool);
-    request.input('cuentaDeudores', sql.VarChar(75), cuentaDeudores);
     return request;
   };
 
   const countRequest = bindFilters(pool.request());
+  const condCuentaDeudoresCount = condicionNotIn(countRequest, "LTRIM(RTRIM(N.ACTNUMST))", 'cuentaDeudores', cuentasDeudores, sql.VarChar(75));
+  const condAccatnumCount = condicionNotIn(countRequest, 'A.ACCATNUM', 'accatContrapartida', accatnumContrapartida, sql.Int);
   const count = await countRequest.query(`
     SELECT COUNT(*) AS total
     FROM GL20000 AS G
     INNER JOIN GL00105 AS N ON N.ACTINDX = G.ACTINDX
+    INNER JOIN GL00100 AS A ON A.ACTINDX = G.ACTINDX
     WHERE
       LTRIM(RTRIM(G.SOURCDOC)) = 'SJ'
       AND G.TRXDATE >= @fechaDesde
       AND G.TRXDATE <= @fechaHasta
-      AND LTRIM(RTRIM(N.ACTNUMST)) <> @cuentaDeudores
+      AND ${condCuentaDeudoresCount}
+      AND ${condAccatnumCount}
       AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%')
   `);
   const totalCount = count.recordset[0].total;
@@ -94,8 +107,12 @@ const getVentasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, soloConP = t
   // cada línea a su documento correcto.
   const sopJoinCondSist2 = empresa === 'sist2' ? ' AND H.SOPTYPE = G.ORTRXTYP' : '';
 
+  const detalleRequest = bindFilters(pool.request());
+  const condCuentaDeudoresDetalle = condicionNotIn(detalleRequest, "LTRIM(RTRIM(N.ACTNUMST))", 'cuentaDeudores', cuentasDeudores, sql.VarChar(75));
+  const condAccatnumDetalle = condicionNotIn(detalleRequest, 'A.ACCATNUM', 'accatContrapartida', accatnumContrapartida, sql.Int);
+
   const [detalle, overridesMap] = await Promise.all([
-    bindFilters(pool.request()).query(`
+    detalleRequest.query(`
       SELECT TOP (${MAX_ROWS})
         NULLIF(LTRIM(RTRIM(H.PHONE3)), '') AS PHONE3,
         LTRIM(RTRIM(H.DOCID)) AS DOCID,
@@ -113,7 +130,8 @@ const getVentasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, soloConP = t
         LTRIM(RTRIM(G.SOURCDOC)) = 'SJ'
         AND G.TRXDATE >= @fechaDesde
         AND G.TRXDATE <= @fechaHasta
-        AND LTRIM(RTRIM(N.ACTNUMST)) <> @cuentaDeudores
+        AND ${condCuentaDeudoresDetalle}
+        AND ${condAccatnumDetalle}
         AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%')
       ORDER BY Cuenta ASC
     `),

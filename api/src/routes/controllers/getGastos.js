@@ -1,7 +1,7 @@
-const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolSist2, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolBasani, getGpPoolSist2, sql } = require('../../config/gpPool');
 const { coincideSucursal } = require('../../services/autorizacion');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, sist2: getGpPoolSist2 };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, basani: getGpPoolBasani, sist2: getGpPoolSist2 };
 
 // Endpoint 3 - Gastos (GL)
 // GL20000 = detalle de movimientos posteados al mayor. GL00100 = maestro de cuentas
@@ -269,6 +269,13 @@ const getGastos = async ({ cuentaDesde, cuentaHasta, fechaDesde, fechaHasta, emp
     ecosistemas: { modo: 'incluir', categorias: [26] },
     ecoportatiles: { modo: 'incluir', categorias: [14, 15] },
     baxpa: { modo: 'excluir', categorias: [26, 72] },
+    // Basani (PRD01): mismo modo "excluir" que BAXPA (plan de cuentas también muy
+    // granular, sin 2 categorías únicas de "Egresos Operativos/No operativos") - se
+    // reusan las mismas categorías de contrapartida de pago ya confirmadas en
+    // getComprasPorSucursal.js (Bancos, Caja/Mercado Pago, Fondo Fijo, Tarjetas,
+    // Proveedores/Deudores) en vez de volver a investigar desde cero para este caso
+    // puntual (OPV/EGRE sin proveedor cargado).
+    basani: { modo: 'excluir', categorias: [1, 13, 230, 100, 102, 103, 104, 87] },
   };
   const configGasto = CUENTA_CATEGORIA_GASTO_POR_EMPRESA[empresa];
   const pagosOPV = grupos.pagos.filter((row) => {

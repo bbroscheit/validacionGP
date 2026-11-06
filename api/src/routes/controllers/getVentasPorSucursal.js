@@ -1,4 +1,4 @@
-const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolCylius, getGpPoolChile, getGpPoolSist2, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolCylius, getGpPoolChile, getGpPoolBasani, getGpPoolSist2, sql } = require('../../config/gpPool');
 const {
   resolverSucursalSist2,
   CLIENTE_SUCURSAL_JOIN_SIST2,
@@ -8,7 +8,7 @@ const {
 const { getOverridesMap } = require('../../services/clasificacionOverrides');
 const { coincideSucursal } = require('../../services/autorizacion');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, cylius: getGpPoolCylius, chile: getGpPoolChile, sist2: getGpPoolSist2 };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, cylius: getGpPoolCylius, chile: getGpPoolChile, basani: getGpPoolBasani, sist2: getGpPoolSist2 };
 
 // Reporte 1 - Ventas por sucursal
 // Ecobahia: agrupa SOP30200 por PHONE3 (la columna real de sucursal - no LOCNCODE, que es

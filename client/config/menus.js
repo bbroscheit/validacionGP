@@ -27,7 +27,7 @@ export const menus = [
       { href: "/reportes/asiento-ventas", label: "Asiento de ventas" },
       { href: "/reportes/ventas-categoria-contribuyente", label: "Ventas por categoría y contribuyente", ocultoPara: ["cylius", "chile"] },
       { href: "/reportes/cuenta-corriente-cliente", label: "Cuenta corriente de cliente" },
-      { href: "/libro-iva-digital", label: "Libro IVA Digital (ARCA)", ocultoPara: ["cylius", "chile"] },
+      { href: "/libro-iva-digital", label: "Libro IVA Digital (ARCA)", ocultoPara: ["cylius", "chile", "basani"] },
     ],
   },
   {
@@ -73,7 +73,13 @@ export const menus = [
 // categoría y contribuyente" dependen de GL00100.USERDEF2 (categoría de cuenta) y de la
 // categoría de contribuyente AFIP (RI/MO/CF/EX) - en Cylius USERDEF2 viene 100% en blanco,
 // y en Chile la tabla AWLI40330 (de donde sale la categoría de contribuyente) directamente
-// no existe - confirmado contra PRD07 y PRD05 respectivamente.
+// no existe - confirmado contra PRD07 y PRD05 respectivamente. Basani (PRD01) se agrega
+// también a "Libro IVA Digital" nada más: su numeración de comprobante (ej.
+// "FVPA0012-00559637", con un código de planta pegado al tipo de documento, distinto del
+// "FV A0040" con espacio que asume libroIvaDigitalData.js) todavía no se verificó contra
+// el parser de ese archivo - queda pendiente, a diferencia del resto de los reportes de
+// Basani (ya onboardeado y verificado).
+
 // "Compras por sucursal" está habilitado para Cylius y Chile - en los dos casos
 // AATransactions (la dimensión de zona) no tiene datos reales para Ventas, pero el
 // mapeo de cuentas (Créditos Fiscales/contrapartida de pago) sí está confirmado para

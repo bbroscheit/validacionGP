@@ -1,7 +1,7 @@
-const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, sql } = require('../../config/gpPool');
-const { bindInList } = require('../../services/sist2Ventas');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolBasani, sql } = require('../../config/gpPool');
+const { condicionNotIn } = require('../../services/sist2Ventas');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, basani: getGpPoolBasani };
 
 // Reporte - Ventas por categoría de cuenta y tipo de contribuyente
 // Categoría = GL00100.USERDEF2 (uno de los 4 campos "definidos por el usuario" de la
@@ -52,10 +52,25 @@ const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, 
 // sin excluirlas, cada una se sumaba/restaba como si fuera una venta real.
 const MONEDA_VACIA = 'En Blanco';
 const CONFIG_EMPRESA = {
-  ecobahia: { cuentasContrapartida: ['113110-01-000'], accatnumImpuestos: 30 },
-  ecosistemas: { cuentasContrapartida: ['112110-02-000'], accatnumImpuestos: 13 },
-  ecoportatiles: { cuentasContrapartida: ['113110-01-000'], accatnumImpuestos: 27 },
-  baxpa: { cuentasContrapartida: ['113110', '111153', '111155', '113116', '111321'], accatnumImpuestos: 17 },
+  ecobahia: { cuentasContrapartida: ['113110-01-000'], accatnumContrapartida: [], accatnumImpuestos: [30] },
+  ecosistemas: { cuentasContrapartida: ['112110-02-000'], accatnumContrapartida: [], accatnumImpuestos: [13] },
+  ecoportatiles: { cuentasContrapartida: ['113110-01-000'], accatnumContrapartida: [], accatnumImpuestos: [27] },
+  baxpa: { cuentasContrapartida: ['113110', '111153', '111155', '113116', '111321'], accatnumContrapartida: [], accatnumImpuestos: [17] },
+  // Basani (PRD01): a diferencia de los demás, la contrapartida de Deudores no es una
+  // sola cuenta sino varias categorías completas de GP, confirmadas 100% contrapartida
+  // contra GL20000 (SOURCDOC='SJ') real - ninguna cuenta de ingreso mezclada en ninguna:
+  // ACCATNUM 87 "Deudores Nacionales" (Deudores por Ventas Nacionales + Morosos/Gestión
+  // Judicial/Previsión Incobrables/Retenciones a Recibir/Cheques Rechazados Proveedor),
+  // 86 "Deudores del Exterior" (mismo cluster, exportación), 100 "Bancos" (cuentas
+  // bancarias, Rapipago, Visa/Mastercard, FCI - se usan como cobro directo sin pasar por
+  // Deudores), 102 "Caja" (incluye Mercado Pago - 890M de contrapartida en ene-ago/2026,
+  // el mayor hallazgo: comprobantes cobrados directo por Mercado Pago sin pasar por
+  // Deudores, confirmado contra FVPA0012-00558416) y 104 (Compensación Cliente/Proveedor,
+  // Valores a depositar, Cheques Rechazados Clientes/Terceros/Propios). Impuestos tampoco
+  // es una sola categoría: 73 (IVA Saldo a Pagar/Débito 10,5%/Ganancias/retenciones a
+  // pagar), 75 (Percepciones y Retenciones de IIBB) y 234 (IVA Débito Fiscal 21% + tasas
+  // municipales) - las 3 confirmadas 100% impuestos, sin ingresos mezclados.
+  basani: { cuentasContrapartida: [], accatnumContrapartida: [86, 87, 100, 102, 104], accatnumImpuestos: [73, 75, 234] },
 };
 const MAX_ROWS = 100000;
 
@@ -66,18 +81,23 @@ const getVentasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta, solo
 
   const pool = await POOLS[empresa]();
   const soloConPBool = soloConP === false || soloConP === 'false' ? false : true;
-  const { cuentasContrapartida: CUENTAS_CONTRAPARTIDA, accatnumImpuestos: ACCATNUM_IMPUESTOS } = CONFIG_EMPRESA[empresa];
+  const {
+    cuentasContrapartida: CUENTAS_CONTRAPARTIDA,
+    accatnumContrapartida: ACCATNUM_CONTRAPARTIDA,
+    accatnumImpuestos: ACCATNUM_IMPUESTOS,
+  } = CONFIG_EMPRESA[empresa];
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
     request.input('fechaHasta', sql.DateTime, new Date(fechaHasta));
     request.input('soloConP', sql.Bit, soloConPBool);
-    request.input('accatnumImpuestos', sql.Int, ACCATNUM_IMPUESTOS);
     return request;
   };
 
   const countRequest = bindFilters(pool.request());
-  const contrapartidaListCount = bindInList(countRequest, 'cuentaContrapartida', CUENTAS_CONTRAPARTIDA);
+  const contrapartidaCount = condicionNotIn(countRequest, "LTRIM(RTRIM(N.ACTNUMST))", 'cuentaContrapartida', CUENTAS_CONTRAPARTIDA, sql.VarChar(75));
+  const accatnumContrapartidaCount = condicionNotIn(countRequest, 'A.ACCATNUM', 'accatContrapartida', ACCATNUM_CONTRAPARTIDA, sql.Int);
+  const accatnumImpuestosCount = condicionNotIn(countRequest, 'A.ACCATNUM', 'accatImpuestos', ACCATNUM_IMPUESTOS, sql.Int);
   const count = await countRequest.query(`
     SELECT COUNT(*) AS total
     FROM GL20000 AS G
@@ -87,14 +107,17 @@ const getVentasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta, solo
       LTRIM(RTRIM(G.SOURCDOC)) = 'SJ'
       AND G.TRXDATE >= @fechaDesde
       AND G.TRXDATE <= @fechaHasta
-      AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (${contrapartidaListCount})
-      AND A.ACCATNUM <> @accatnumImpuestos
+      AND ${contrapartidaCount}
+      AND ${accatnumContrapartidaCount}
+      AND ${accatnumImpuestosCount}
       AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%')
   `);
   const totalCount = count.recordset[0].total;
 
   const detalleRequest = bindFilters(pool.request());
-  const contrapartidaListDetalle = bindInList(detalleRequest, 'cuentaContrapartida', CUENTAS_CONTRAPARTIDA);
+  const contrapartidaDetalle = condicionNotIn(detalleRequest, "LTRIM(RTRIM(N.ACTNUMST))", 'cuentaContrapartida', CUENTAS_CONTRAPARTIDA, sql.VarChar(75));
+  const accatnumContrapartidaDetalle = condicionNotIn(detalleRequest, 'A.ACCATNUM', 'accatContrapartida', ACCATNUM_CONTRAPARTIDA, sql.Int);
+  const accatnumImpuestosDetalle = condicionNotIn(detalleRequest, 'A.ACCATNUM', 'accatImpuestos', ACCATNUM_IMPUESTOS, sql.Int);
   const detalle = await detalleRequest.query(`
     SELECT TOP (${MAX_ROWS})
       NULLIF(LTRIM(RTRIM(A.USERDEF2)), '') AS Categoria,
@@ -114,8 +137,9 @@ const getVentasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta, solo
       LTRIM(RTRIM(G.SOURCDOC)) = 'SJ'
       AND G.TRXDATE >= @fechaDesde
       AND G.TRXDATE <= @fechaHasta
-      AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (${contrapartidaListDetalle})
-      AND A.ACCATNUM <> @accatnumImpuestos
+      AND ${contrapartidaDetalle}
+      AND ${accatnumContrapartidaDetalle}
+      AND ${accatnumImpuestosDetalle}
       AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%')
     ORDER BY Categoria ASC
   `);

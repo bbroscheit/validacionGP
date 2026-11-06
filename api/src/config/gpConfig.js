@@ -3,6 +3,7 @@ require('dotenv').config();
 const {
   GP_USER, GP_PASSWORD, GP_SERVER, GP_DATABASE_ECOBAHIA, GP_DATABASE_ECOSISTEMAS,
   GP_DATABASE_ECOPORTATILES, GP_DATABASE_BAXPA, GP_DATABASE_CYLIUS, GP_DATABASE_CHILE,
+  GP_DATABASE_BASANI,
   GP2_USER, GP2_PASSWORD, GP2_SERVER, GP2_DATABASE_SIST2,
 } = process.env;
 
@@ -63,6 +64,18 @@ const gpConfigChile = {
   database: GP_DATABASE_CHILE,
 };
 
+// Basani (PRD01): séptimo emprendimiento, mismo servidor y credenciales que Ecobahia -
+// confirmado mismo esquema de tablas, pero con MUCHO más volumen que los otros 6 (ej.
+// 956K filas en SOP30200 contra ~10-50K de los demás, 1,48M en RM20101) - varias consultas
+// que andan bien en los otros emprendimientos tardan más de los 15s default de mssql acá
+// (confirmado con getVentasPorCategoriaContribuyente/getVentasPorSucursal en paralelo).
+// Se sube requestTimeout a 60s solo para este pool.
+const gpConfigBasani = {
+  ...gpConfigEcobahia,
+  database: GP_DATABASE_BASANI,
+  requestTimeout: 60000,
+};
+
 // Servidor "sist2" (172.19.31.47, empresa "sist2 ecobahia"): encrypt debe ir en false -
 // con true, mssql tira error de negociación TLS (versión de protocolo vieja de ese SQL
 // Server, incompatible con el default de Node/OpenSSL). Confirmado al conectar por
@@ -80,4 +93,4 @@ const gpConfigSist2 = {
   },
 };
 
-module.exports = { gpConfigEcobahia, gpConfigEcosistemas, gpConfigEcoportatiles, gpConfigBaxpa, gpConfigCylius, gpConfigChile, gpConfigSist2 };
+module.exports = { gpConfigEcobahia, gpConfigEcosistemas, gpConfigEcoportatiles, gpConfigBaxpa, gpConfigCylius, gpConfigChile, gpConfigBasani, gpConfigSist2 };

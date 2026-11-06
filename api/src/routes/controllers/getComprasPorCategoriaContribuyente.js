@@ -1,6 +1,7 @@
-const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, sql } = require('../../config/gpPool');
+const { getGpPoolEcobahia, getGpPoolEcosistemas, getGpPoolEcoportatiles, getGpPoolBaxpa, getGpPoolBasani, sql } = require('../../config/gpPool');
+const { condicionNotIn } = require('../../services/sist2Ventas');
 
-const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa };
+const POOLS = { ecobahia: getGpPoolEcobahia, ecosistemas: getGpPoolEcosistemas, ecoportatiles: getGpPoolEcoportatiles, baxpa: getGpPoolBaxpa, basani: getGpPoolBasani };
 
 // Reporte - Compras por categoría de cuenta y tipo de contribuyente
 // Mismo esquema que getVentasPorCategoriaContribuyente.js pero para compras: GL20000
@@ -43,23 +44,30 @@ const MONEDA_VACIA = 'En Blanco';
 const CONFIG_EMPRESA = {
   ecobahia: {
     cuentasContrapartida: ['211101-01-000', '223202-01-000'],
-    accatnumImpuestos: 9,
-    accatnumBancos: 22,
+    accatnumImpuestos: [9],
+    accatnumContrapartida: [22],
   },
   ecosistemas: {
     cuentasContrapartida: ['211110-01-000', '211210-01-000'],
-    accatnumImpuestos: 37,
-    accatnumBancos: 22,
+    accatnumImpuestos: [37],
+    accatnumContrapartida: [22],
   },
   ecoportatiles: {
     cuentasContrapartida: ['211101-01-000'],
-    accatnumImpuestos: 9,
-    accatnumBancos: 20,
+    accatnumImpuestos: [9],
+    accatnumContrapartida: [20],
   },
   baxpa: {
     cuentasContrapartida: ['211101', '213224', '213225', '213226'],
-    accatnumImpuestos: 49,
-    accatnumBancos: 26,
+    accatnumImpuestos: [49],
+    accatnumContrapartida: [26],
+  },
+  // Basani (PRD01): mismo mapeo que getComprasPorSucursal.js (ver ese archivo para el
+  // detalle completo de cada categoría confirmada contra GL20000 real).
+  basani: {
+    cuentasContrapartida: [],
+    accatnumImpuestos: [135, 73, 75],
+    accatnumContrapartida: [1, 13, 230, 100, 102, 103, 104, 87],
   },
 };
 const MAX_ROWS = 100000;
@@ -72,15 +80,15 @@ const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta, emp
   }
 
   const pool = await POOLS[empresa]();
-  const { cuentasContrapartida: CUENTAS_CONTRAPARTIDA, accatnumImpuestos: ACCATNUM_IMPUESTOS, accatnumBancos: ACCATNUM_BANCOS } = CONFIG_EMPRESA[empresa];
-  const cuentaContrapartidaInClause = CUENTAS_CONTRAPARTIDA.map((_, i) => `@cuentaContrapartida${i}`).join(', ');
+  const {
+    cuentasContrapartida: CUENTAS_CONTRAPARTIDA,
+    accatnumImpuestos: ACCATNUM_IMPUESTOS,
+    accatnumContrapartida: ACCATNUM_CONTRAPARTIDA,
+  } = CONFIG_EMPRESA[empresa];
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
     request.input('fechaHasta', sql.DateTime, new Date(fechaHasta));
-    CUENTAS_CONTRAPARTIDA.forEach((cuenta, i) => request.input(`cuentaContrapartida${i}`, sql.VarChar(75), cuenta));
-    request.input('accatnumImpuestos', sql.Int, ACCATNUM_IMPUESTOS);
-    request.input('accatnumBancos', sql.Int, ACCATNUM_BANCOS);
     return request;
   };
 
@@ -103,6 +111,9 @@ const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta, emp
   `;
 
   const countRequest = bindFilters(pool.request());
+  const condCuentaContrapartidaCount = condicionNotIn(countRequest, "LTRIM(RTRIM(N.ACTNUMST))", 'cuentaContrapartida', CUENTAS_CONTRAPARTIDA, sql.VarChar(75));
+  const condAccatnumImpuestosCount = condicionNotIn(countRequest, 'A.ACCATNUM', 'accatImpuestos', ACCATNUM_IMPUESTOS, sql.Int);
+  const condAccatnumContrapartidaCount = condicionNotIn(countRequest, 'A.ACCATNUM', 'accatContrapartida', ACCATNUM_CONTRAPARTIDA, sql.Int);
   const count = await countRequest.query(`
     SELECT COUNT(*) AS total
     FROM GL20000 AS G
@@ -112,14 +123,17 @@ const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta, emp
       LTRIM(RTRIM(G.SOURCDOC)) IN ('PMTRX', 'PMVVR')
       AND G.TRXDATE >= @fechaDesde
       AND G.TRXDATE <= @fechaHasta
-      AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (${cuentaContrapartidaInClause})
-      AND A.ACCATNUM <> @accatnumImpuestos
-      AND A.ACCATNUM <> @accatnumBancos
+      AND ${condCuentaContrapartidaCount}
+      AND ${condAccatnumImpuestosCount}
+      AND ${condAccatnumContrapartidaCount}
       ${noAnuladaWhere}
   `);
   const totalCount = count.recordset[0].total;
 
   const detalleRequest = bindFilters(pool.request());
+  const condCuentaContrapartidaDetalle = condicionNotIn(detalleRequest, "LTRIM(RTRIM(N.ACTNUMST))", 'cuentaContrapartida', CUENTAS_CONTRAPARTIDA, sql.VarChar(75));
+  const condAccatnumImpuestosDetalle = condicionNotIn(detalleRequest, 'A.ACCATNUM', 'accatImpuestos', ACCATNUM_IMPUESTOS, sql.Int);
+  const condAccatnumContrapartidaDetalle = condicionNotIn(detalleRequest, 'A.ACCATNUM', 'accatContrapartida', ACCATNUM_CONTRAPARTIDA, sql.Int);
   const detalle = await detalleRequest.query(`
     SELECT TOP (${MAX_ROWS})
       NULLIF(LTRIM(RTRIM(A.USERDEF2)), '') AS Categoria,
@@ -150,9 +164,9 @@ const getComprasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta, emp
       LTRIM(RTRIM(G.SOURCDOC)) IN ('PMTRX', 'PMVVR')
       AND G.TRXDATE >= @fechaDesde
       AND G.TRXDATE <= @fechaHasta
-      AND LTRIM(RTRIM(N.ACTNUMST)) NOT IN (${cuentaContrapartidaInClause})
-      AND A.ACCATNUM <> @accatnumImpuestos
-      AND A.ACCATNUM <> @accatnumBancos
+      AND ${condCuentaContrapartidaDetalle}
+      AND ${condAccatnumImpuestosDetalle}
+      AND ${condAccatnumContrapartidaDetalle}
       ${noAnuladaWhere}
     ORDER BY Categoria ASC
   `);
