@@ -33,7 +33,7 @@ export default function Nav({ usuario, onLogout }) {
 
   return (
     <nav className="bg-[var(--color-primary)] text-white">
-      <div ref={navRef} className="max-w-5xl mx-auto flex items-center gap-4 px-4 py-3">
+      <div ref={navRef} className="max-w-[1600px] mx-auto flex items-center gap-4 px-4 py-3">
         <Link href="/" className="font-semibold">
           Validación GP
         </Link>

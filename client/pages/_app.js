@@ -41,7 +41,7 @@ export default function App({ Component, pageProps }) {
   return (
     <SesionProvider sesion={sesion || null}>
       {!enLogin && !enElegirEmprendimiento && <Nav usuario={sesion} onLogout={() => setSesion(false)} />}
-      <main className={enLogin || enElegirEmprendimiento ? "" : "max-w-5xl mx-auto px-4 py-6"}>
+      <main className={enLogin || enElegirEmprendimiento ? "" : "max-w-[1600px] mx-auto px-4 py-6"}>
         <Component {...pageProps} />
       </main>
     </SesionProvider>
