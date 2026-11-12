@@ -25,7 +25,7 @@ const getCuentaCorrienteCliente = require('./controllers/getCuentaCorrienteClien
 const getProveedoresCompras = require('./controllers/getProveedoresCompras.js');
 const getCuentaCorrienteProveedor = require('./controllers/getCuentaCorrienteProveedor.js');
 const { putOverrideClasificacion, deleteOverrideClasificacion } = require('./controllers/overridesClasificacion.js');
-const { subirMovimientos, listarMovimientos, actualizarNumeroManual, actualizarReciboCreado } = require('../services/movimientosBanco.js');
+const { subirMovimientos, listarMovimientos, actualizarNumeroManual, actualizarReciboCreado, actualizarRetencion } = require('../services/movimientosBanco.js');
 const bloquearSiRestringido = require('../middlewares/bloquearSiRestringido.js');
 const soloEcobahia = require('../middlewares/soloEcobahia.js');
 
@@ -451,6 +451,21 @@ validacionRouter.put('/bancos-cobranzas/movimientos/:id/recibo', soloEcobahia, a
     res.status(200).json(data);
   } catch (e) {
     console.log('error en PUT /bancos-cobranzas/movimientos/:id/recibo', e.message);
+    res.status(500).json({ state: 'error', message: e.message });
+  }
+});
+
+// Retenciones por movimiento (Ganancias/IIBB/IIBB CABA/IVA/SUSS/Otra + factura a aplicar):
+// dato propio de cada sucursal, no viene de GP. Si retencion='no' el servicio fuerza los
+// 6 montos a null (ver services/movimientosBanco.js).
+validacionRouter.put('/bancos-cobranzas/movimientos/:id/retencion', soloEcobahia, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { retencion, facturaAplicar, montos } = req.body;
+    const data = await actualizarRetencion({ id, retencion, facturaAplicar, montos, usuario: req.usuario?.usuario });
+    res.status(200).json(data);
+  } catch (e) {
+    console.log('error en PUT /bancos-cobranzas/movimientos/:id/retencion', e.message);
     res.status(500).json({ state: 'error', message: e.message });
   }
 });

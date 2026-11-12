@@ -8,23 +8,49 @@ const { buscarCliente } = require('./clientesGp.js');
 // antes hacía controllers/procesarCobranzasBanco.js, ahora eliminado - esta es la
 // continuación de esa lógica con persistencia agregada).
 //
-// Layout de columnas compartido por los 4 bancos implementados (confirmado contra excels
+// Layout de columnas compartido por los 4 bancos "genéricos" (confirmado contra excels
 // reales de Credicoop/Francés/Provincia/Chubut): FECHA/CONCEPTO/IMPORTE/OBSERVACIONES/
-// ESTADO. Si algún banco futuro trae otro layout, hay que generalizar esto (ver también
-// el comentario de CUIT_EN_TEXTO_RE más abajo, que es el mismo regex ya validado contra
-// los 4 bancos).
-const BANCOS_IMPLEMENTADOS = ['credicoop', 'frances', 'provincia', 'chubut'];
+// ESTADO (ver también el comentario de CUIT_EN_TEXTO_RE más abajo, el mismo regex ya
+// validado contra los 4). "echeq" (cheques de terceros) tiene un layout totalmente
+// distinto - ver parsearFilasEcheq más abajo y la nota larga en el modelo.
+const BANCOS_GENERICOS = ['credicoop', 'frances', 'provincia', 'chubut'];
+const BANCOS_IMPLEMENTADOS = [...BANCOS_GENERICOS, 'echeq'];
 const COL_FECHA = 0;
 const COL_CONCEPTO = 1;
 const COL_IMPORTE = 2;
 const COL_OBSERVACIONES = 3;
 const COL_ESTADO = 4;
 
+const ECHEQ_COL_EMITIDO = 0;
+const ECHEQ_COL_ENDOSADO = 1;
+const ECHEQ_COL_BANCO_EMISOR = 2;
+const ECHEQ_COL_FECHA_EMISION = 3;
+const ECHEQ_COL_FECHA_PAGO = 4;
+const ECHEQ_COL_MONTO = 5;
+const ECHEQ_COL_NUMERO_CHEQUE = 6;
+const ECHEQ_COL_CUIT = 7; // rotulada "Tipo de Documento" en el excel de origen, pero el dato real es el CUIT del emisor
+
+const hoyIso = () => {
+  const hoy = new Date();
+  const yyyy = hoy.getFullYear();
+  const mm = String(hoy.getMonth() + 1).padStart(2, '0');
+  const dd = String(hoy.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
 // Mismo regex que procesarCobranzasBanco.js tenía: condición "no pegado a otro DÍGITO" en
 // ninguna punta (no \b, porque letra-a-dígito no es un límite de palabra), confirmado
 // contra los 4 bancos reales incluyendo el caso de Provincia que pega el CUIT directo
 // contra la primera letra del nombre sin separador.
 const CUIT_EN_TEXTO_RE = /(?<!\d)(\d{11})(?!\d)/;
+
+// echeq SÍ trae el CUIT en una columna propia y dedicada (a diferencia de los 4 bancos
+// genéricos, que lo tienen mezclado en CONCEPTO/OBSERVACIONES) - no hace falta el regex
+// de arriba, alcanza con limpiar separadores (guiones/espacios) y validar los 11 dígitos.
+const cuitDeColumnaDedicada = (valorCrudo) => {
+  const soloDigitos = String(valorCrudo ?? '').replace(/\D/g, '');
+  return soloDigitos.length === 11 ? soloDigitos : null;
+};
 
 // FECHA/IMPORTE del excel real son celdas de fecha/moneda genuinas de Excel, no texto -
 // el cliente ahora las lee con `cellDates: true` + `raw: true` (ver leerExcelHojas.js)
@@ -71,7 +97,10 @@ const parsearImporte = (valorCrudo) => {
   return negativo ? -numero : numero;
 };
 
-const calcularClaveFila = ({ banco, fecha, concepto, importe, observaciones }) =>
+// Cada registro ya sale de su parser (genérico o echeq) con su propia `claveFila`
+// calculada - detectarConflictos/subirMovimientos la usan tal cual, sin recalcularla, así
+// no hay riesgo de que las dos fórmulas (genérica/echeq) queden desincronizadas entre sí.
+const calcularClaveFilaGenerica = ({ banco, fecha, concepto, importe, observaciones }) =>
   crypto
     .createHash('md5')
     .update(`${banco}|${fecha}|${concepto}|${importe.toFixed(2)}|${observaciones || ''}`)
@@ -82,14 +111,7 @@ const calcularClaveFila = ({ banco, fecha, concepto, importe, observaciones }) =
 // IMPORTE que no se puede interpretar, NO se guarda nada - se rechaza el archivo entero
 // con el detalle de qué filas y qué columna fallaron (mismo principio que los conflictos
 // de detectarConflictos: nunca persistir a medias).
-const parsearFilas = async ({ banco, filas }) => {
-  if (!BANCOS_IMPLEMENTADOS.includes(banco)) {
-    throw new Error(`El formato del banco "${banco}" todavía no está implementado`);
-  }
-  if (!Array.isArray(filas) || filas.length < 2) {
-    throw new Error('filas (con encabezado) son requeridas');
-  }
-
+const parsearFilasGenerico = async ({ banco, filas }) => {
   const [, ...datos] = filas;
   const erroresFormato = [];
 
@@ -110,8 +132,9 @@ const parsearFilas = async ({ banco, filas }) => {
       const estadoBanco = String(fila[COL_ESTADO] ?? '').trim() || null;
       const cuitMatch = concepto.match(CUIT_EN_TEXTO_RE);
       const match = await buscarCliente({ cuit: cuitMatch ? cuitMatch[1] : null, nombre: observaciones });
+      const claveFila = calcularClaveFilaGenerica({ banco, fecha, concepto, importe, observaciones });
 
-      return { numeroFila, fecha, concepto, importe, observaciones, estadoBanco, match };
+      return { numeroFila, fecha, concepto, importe, observaciones, estadoBanco, match, claveFila };
     })
   );
 
@@ -125,16 +148,85 @@ const parsearFilas = async ({ banco, filas }) => {
   return registros;
 };
 
-// Dentro de un mismo excel, dos o más filas con la misma fecha+concepto+importe+
-// observaciones quedan indistinguibles entre sí (es la misma clave natural que se usa
-// para el upsert) - no se puede saber si es la misma operación repetida por error o dos
-// operaciones reales iguales, así que se devuelven para que el usuario corrija el excel.
-const detectarConflictos = (registros, banco) => {
+// echeq (cheques de terceros): layout de columnas totalmente distinto a los 4 bancos
+// genéricos - ver la nota larga en el modelo (MovimientoBanco.js) para el porqué de cada
+// decisión (fecha = fecha de subida, CUIT en columna propia, clave natural sin la fecha).
+// `fecha` queda fija en HOY (fecha de subida del archivo) porque el excel de e-cheq no
+// trae una fecha de "movimiento" propia (a pedido del usuario) - por eso la clave natural
+// NO puede incluir `fecha` (cambiaría en cada re-upload de un día distinto y duplicaría
+// filas); se arma en cambio con N° de cheque + CUIT + monto + Fecha de Pago (intrínsecos
+// al cheque, no al momento de subida).
+const parsearFilasEcheq = async (filas) => {
+  const [, ...datos] = filas;
+  const erroresFormato = [];
+  const hoy = hoyIso();
+
+  const registros = await Promise.all(
+    datos.map(async (fila, i) => {
+      const numeroFila = i + 2;
+      const fechaEmisionCruda = fila[ECHEQ_COL_FECHA_EMISION];
+      const fechaPagoCruda = fila[ECHEQ_COL_FECHA_PAGO];
+      const montoCrudo = fila[ECHEQ_COL_MONTO];
+      const fechaEmision = parsearFecha(fechaEmisionCruda);
+      const fechaPago = parsearFecha(fechaPagoCruda);
+      const importe = parsearImporte(montoCrudo);
+
+      if (!fechaEmision) erroresFormato.push({ numeroFila, columna: 'Fecha de emisión', valorCrudo: fechaEmisionCruda });
+      if (!fechaPago) erroresFormato.push({ numeroFila, columna: 'Fecha de Pago', valorCrudo: fechaPagoCruda });
+      if (importe === null) erroresFormato.push({ numeroFila, columna: 'Monto', valorCrudo: montoCrudo });
+      if (!fechaEmision || !fechaPago || importe === null) return null;
+
+      const emitidoPor = String(fila[ECHEQ_COL_EMITIDO] ?? '').trim();
+      const endosadoPor = String(fila[ECHEQ_COL_ENDOSADO] ?? '').trim();
+      const bancoEmisor = String(fila[ECHEQ_COL_BANCO_EMISOR] ?? '').trim();
+      const numeroCheque = String(fila[ECHEQ_COL_NUMERO_CHEQUE] ?? '').trim();
+      const cuitEcheq = cuitDeColumnaDedicada(fila[ECHEQ_COL_CUIT]);
+      const match = await buscarCliente({ cuit: cuitEcheq, nombre: emitidoPor });
+      const claveFila = crypto
+        .createHash('md5')
+        .update(`echeq|${numeroCheque}|${cuitEcheq || ''}|${importe.toFixed(2)}|${fechaPago}`)
+        .digest('hex');
+
+      return {
+        numeroFila,
+        fecha: hoy,
+        concepto: `${emitidoPor} - cheque ${numeroCheque}`.trim(),
+        importe,
+        observaciones: [endosadoPor, bancoEmisor].filter(Boolean).join(' / '),
+        estadoBanco: null,
+        match,
+        claveFila,
+        emitidoPor,
+        endosadoPor,
+        bancoEmisor,
+        fechaEmision,
+        fechaPago,
+        numeroCheque,
+        cuitEcheq,
+      };
+    })
+  );
+
+  if (erroresFormato.length) {
+    const error = new Error('Hay filas con fecha o monto que no se pudieron interpretar.');
+    error.tipo = 'FORMATO_INVALIDO';
+    error.errores = erroresFormato;
+    throw error;
+  }
+
+  return registros;
+};
+
+// Dentro de un mismo excel, dos o más filas con la misma clave natural (fecha+concepto+
+// importe+observaciones para bancos genéricos; N° de cheque+CUIT+monto+Fecha de Pago para
+// echeq) quedan indistinguibles entre sí - no se puede saber si es la misma operación
+// repetida por error o dos operaciones reales iguales, así que se devuelven para que el
+// usuario corrija el excel.
+const detectarConflictos = (registros) => {
   const grupos = new Map();
   registros.forEach((r) => {
-    const clave = calcularClaveFila({ banco, fecha: r.fecha, concepto: r.concepto, importe: r.importe, observaciones: r.observaciones });
-    if (!grupos.has(clave)) grupos.set(clave, []);
-    grupos.get(clave).push(r);
+    if (!grupos.has(r.claveFila)) grupos.set(r.claveFila, []);
+    grupos.get(r.claveFila).push(r);
   });
   return [...grupos.values()]
     .filter((grupo) => grupo.length > 1)
@@ -156,10 +248,19 @@ const datosDeMatch = (match) => {
 // mismo excel, o de uno con rango de fechas superpuesto) actualiza los campos calculados
 // (por si cambió la base de clientes de GP) pero nunca toca custnmbrManual/usuarioManual/
 // fechaManual - lo que el usuario ya resolvió a mano no se pierde al re-subir.
-const subirMovimientos = async ({ banco, filas }) => {
-  const registros = await parsearFilas({ banco, filas });
+const CAMPOS_ECHEQ = ['emitidoPor', 'endosadoPor', 'bancoEmisor', 'fechaEmision', 'fechaPago', 'numeroCheque', 'cuitEcheq'];
 
-  const conflictos = detectarConflictos(registros, banco);
+const subirMovimientos = async ({ banco, filas }) => {
+  if (!BANCOS_IMPLEMENTADOS.includes(banco)) {
+    throw new Error(`El formato del banco "${banco}" todavía no está implementado`);
+  }
+  if (!Array.isArray(filas) || filas.length < 2) {
+    throw new Error('filas (con encabezado) son requeridas');
+  }
+
+  const registros = banco === 'echeq' ? await parsearFilasEcheq(filas) : await parsearFilasGenerico({ banco, filas });
+
+  const conflictos = detectarConflictos(registros);
   if (conflictos.length) {
     const error = new Error('Hay filas que quedan indistinguibles entre sí dentro del mismo excel.');
     error.tipo = 'CONFLICTO_FILAS';
@@ -171,7 +272,6 @@ const subirMovimientos = async ({ banco, filas }) => {
   let actualizados = 0;
 
   for (const r of registros) {
-    const claveFila = calcularClaveFila({ banco, fecha: r.fecha, concepto: r.concepto, importe: r.importe, observaciones: r.observaciones });
     const datosCalculados = datosDeMatch(r.match);
     const camposBase = {
       banco,
@@ -182,13 +282,16 @@ const subirMovimientos = async ({ banco, filas }) => {
       estadoBanco: r.estadoBanco,
       ...datosCalculados,
     };
+    if (banco === 'echeq') {
+      CAMPOS_ECHEQ.forEach((campo) => { camposBase[campo] = r[campo]; });
+    }
 
-    const existente = await MovimientoBanco.findOne({ where: { claveFila } });
+    const existente = await MovimientoBanco.findOne({ where: { claveFila: r.claveFila } });
     if (existente) {
       await existente.update(camposBase);
       actualizados += 1;
     } else {
-      await MovimientoBanco.create({ ...camposBase, claveFila });
+      await MovimientoBanco.create({ ...camposBase, claveFila: r.claveFila });
       insertados += 1;
     }
   }
@@ -231,7 +334,10 @@ const listarMovimientos = async ({ banco, desde, hasta, busqueda = '', soloFalta
   const soloFaltantesBool = soloFaltantes === true || soloFaltantes === 'true';
 
   const filtradas = conPendiente
-    .filter((f) => !busquedaNorm || [f.concepto, f.observaciones, f.custnmbrCalculado, f.custnmbrManual, f.candidatosAmbiguos]
+    .filter((f) => !busquedaNorm || [
+      f.concepto, f.observaciones, f.custnmbrCalculado, f.custnmbrManual, f.candidatosAmbiguos,
+      f.emitidoPor, f.endosadoPor, f.bancoEmisor, f.numeroCheque, f.cuitEcheq,
+    ]
       .filter(Boolean)
       .join(' ')
       .toLowerCase()
@@ -276,4 +382,36 @@ const actualizarReciboCreado = async ({ id, reciboCreado, usuario }) => {
   return aPlano(movimiento.get({ plain: true }));
 };
 
-module.exports = { subirMovimientos, listarMovimientos, actualizarNumeroManual, actualizarReciboCreado };
+const MONTOS_RETENCION = ['montoGanancias', 'montoIIBB', 'montoIIBBCaba', 'montoIVA', 'montoSUSS', 'montoOtra'];
+
+// Campos de retención que cada sucursal completa a mano (ver nota en el modelo). Si
+// retencion='no' se fuerza a null los 6 montos del lado del servidor, sin importar qué
+// mande el cliente - así el dato queda consistente aunque el frontend tenga algún bug y
+// los mande igual estando deshabilitados.
+const actualizarRetencion = async ({ id, retencion, facturaAplicar, montos = {}, usuario }) => {
+  const movimiento = await MovimientoBanco.findByPk(id);
+  if (!movimiento) {
+    throw new Error('Movimiento no encontrado');
+  }
+  const valorRetencion = retencion === 'si' || retencion === 'no' ? retencion : null;
+  const camposMonto = {};
+  MONTOS_RETENCION.forEach((campo) => {
+    if (valorRetencion === 'no') {
+      camposMonto[campo] = null;
+      return;
+    }
+    const crudo = montos[campo];
+    camposMonto[campo] = crudo === '' || crudo === undefined || crudo === null ? null : Number(crudo);
+  });
+
+  await movimiento.update({
+    retencion: valorRetencion,
+    facturaAplicar: String(facturaAplicar || '').trim() || null,
+    ...camposMonto,
+    usuarioRetencion: usuario,
+    fechaRetencion: new Date(),
+  });
+  return aPlano(movimiento.get({ plain: true }));
+};
+
+module.exports = { subirMovimientos, listarMovimientos, actualizarNumeroManual, actualizarReciboCreado, actualizarRetencion };
