@@ -153,6 +153,8 @@ export default function CuentaCorrienteSist2() {
   return (
     <div>
       <h1 className="text-xl font-semibold mb-4">Cuenta corriente de cliente (Sist2)</h1>
+      {/* Comentado a pedido del usuario (2026-11-10): referencia técnica interna, no para el
+          usuario final.
       <p className="text-sm text-gray-600 mb-4">
         Historial completo del cliente (RM20101 - facturas, devoluciones, notas de crédito/débito
         y recibos, todas en una sola tabla). El saldo inicial suma TODO lo anterior a la fecha
@@ -165,6 +167,7 @@ export default function CuentaCorrienteSist2() {
         aplicar) - no es una foto histórica: un documento viejo ya cobrado no aparece aunque
         el rango de fechas incluya el momento en que todavía estaba pendiente.
       </p>
+      */}
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
         <div className="relative">

@@ -128,6 +128,8 @@ export default function ComprasPorSucursal() {
   return (
     <div>
       <h1 className="text-xl font-semibold mb-4">Compras por sucursal</h1>
+      {/* Comentado a pedido del usuario (2026-11-10): referencia técnica interna, no para el
+          usuario final.
       <p className="text-sm text-gray-600 mb-4">
         GL20000 (asientos de compras, SOURCDOC = PMTRX/PMVVR) agrupado por la zona de
         Contabilidad Analítica del asiento. Se agrupa por la descripción de zona
@@ -140,6 +142,7 @@ export default function ComprasPorSucursal() {
         (223202). Hacé click en una sucursal para ver y corregir los comprobantes que la
         componen.
       </p>
+      */}
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
         <div>

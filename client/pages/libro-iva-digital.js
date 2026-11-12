@@ -54,6 +54,8 @@ export default function LibroIvaDigital() {
   return (
     <div>
       <h1 className="text-xl font-semibold mb-4">Libro IVA Digital (ARCA)</h1>
+      {/* Comentado a pedido del usuario (2026-11-10): referencia técnica interna, no para el
+          usuario final.
       <p className="text-sm text-gray-600 mb-4">
         Neto, impuestos y total de ventas y compras del período, y exportación de los 4
         archivos .txt (VENTAS_CBTE, VENTAS_ALICUOTAS, COMPRAS_CBTE, COMPRAS_ALICUOTAS -
@@ -62,6 +64,7 @@ export default function LibroIvaDigital() {
         anchos de algunos campos alfanuméricos se adoptaron por convención porque el
         instructivo oficial no los detalla byte a byte.
       </p>
+      */}
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
         <div>

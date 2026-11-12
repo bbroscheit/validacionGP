@@ -43,12 +43,15 @@ export default function VentasPorSucursalSist2() {
   return (
     <div>
       <h1 className="text-xl font-semibold mb-4">Ventas por sucursal (Sist2)</h1>
+      {/* Comentado a pedido del usuario (2026-11-10): referencia técnica interna, no para el
+          usuario final.
       <p className="text-sm text-gray-600 mb-4">
         SOP30200 agrupado por sucursal. La sucursal se resuelve con 3 fuentes (PHONE3, después DOCID,
         después la ficha del cliente) porque en sist2 ninguna sola alcanza. El monto facturado es el
         neto (SUBTOTAL - BCKTXAMT, con signo invertido en notas de crédito según SOPTYPE) - la suma
         total debe cerrar contra el subtotal del libro IVA Ventas del mismo período.
       </p>
+      */}
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
         <div>

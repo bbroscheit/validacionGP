@@ -38,10 +38,13 @@ export default function DetalleVentas() {
   return (
     <div>
       <h1 className="text-xl font-semibold mb-4">Detalle de Ventas</h1>
+      {/* Comentado a pedido del usuario (2026-11-10): referencia técnica interna, no para el
+          usuario final (expone tablas/campos de GP).
       <p className="text-sm text-gray-600 mb-4">
         GL20000 filtrado por rango de cuentas, mostrando solo ORGNTSRC = SLSTE (facturas de
         venta). Para controlar contra el reporte de Ventas (SOP30200).
       </p>
+      */}
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
         <div>

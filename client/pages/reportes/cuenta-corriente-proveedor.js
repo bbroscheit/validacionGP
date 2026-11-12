@@ -128,6 +128,8 @@ export default function CuentaCorrienteProveedor() {
   return (
     <div>
       <h1 className="text-xl font-semibold mb-4">Cuenta corriente de proveedor</h1>
+      {/* Comentado a pedido del usuario (2026-11-10): referencia técnica interna, no para el
+          usuario final.
       <p className="text-sm text-gray-600 mb-4">
         Historial completo del proveedor (facturas, devoluciones, notas de crédito,
         cargos y pagos, uniendo lo abierto y lo ya pagado). El saldo inicial suma TODO lo
@@ -137,6 +139,7 @@ export default function CuentaCorrienteProveedor() {
         &quot;Montos pendientes&quot; muestra solo los documentos que todavía tienen saldo
         sin saldar HOY - no es una foto histórica.
       </p>
+      */}
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
         <div className="relative">

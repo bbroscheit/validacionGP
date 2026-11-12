@@ -98,6 +98,8 @@ export default function ComprasCategoriaContribuyente() {
   return (
     <div>
       <h1 className="text-xl font-semibold mb-4">Compras por categoría y tipo de contribuyente</h1>
+      {/* Comentado a pedido del usuario (2026-11-10): referencia técnica interna, no para el
+          usuario final.
       <p className="text-sm text-gray-600 mb-4">
         GL20000 (asientos de compras, SOURCDOC = PMTRX/PMVVR) agrupado por categoría de
         cuenta (GL00100.USERDEF2) y tipo de contribuyente del proveedor (RI, CF, EX, Iva
@@ -105,6 +107,7 @@ export default function ComprasCategoriaContribuyente() {
         (proveedores 211101 y Visa Francés a Pagar 223202) y las cuentas de impuestos
         (IVA Crédito Fiscal, percepciones).
       </p>
+      */}
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
         <div>

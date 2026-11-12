@@ -50,11 +50,14 @@ export default function AsientoVentas() {
   return (
     <div>
       <h1 className="text-xl font-semibold mb-4">Asiento contable de ventas</h1>
+      {/* Comentado a pedido del usuario (2026-11-10): referencia técnica interna, no para el
+          usuario final.
       <p className="text-sm text-gray-600 mb-4">
         GL20000 (SOURCDOC = SJ) agrupado por cuenta con Debe y Haber, filtrado opcionalmente
         por sucursal (vía SOP30200.PHONE3). Sin sucursal seleccionada muestra el asiento
         consolidado de todas.
       </p>
+      */}
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
         <div>

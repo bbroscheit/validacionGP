@@ -52,10 +52,13 @@ export default function AsientoCompras() {
   return (
     <div>
       <h1 className="text-xl font-semibold mb-4">Asiento contable de compras</h1>
+      {/* Comentado a pedido del usuario (2026-11-10): referencia técnica interna, no para el
+          usuario final.
       <p className="text-sm text-gray-600 mb-4">
         GL20000 (SOURCDOC = PMTRX/PMVVR) agrupado por cuenta con Debe y Haber - asiento
         consolidado de todas las sucursales.
       </p>
+      */}
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
         {/*

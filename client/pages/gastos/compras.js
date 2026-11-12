@@ -38,10 +38,14 @@ export default function ComprasGL() {
   return (
     <div>
       <h1 className="text-xl font-semibold mb-4">Compras (GL)</h1>
+      {/* Comentado a pedido del usuario (2026-11-10): le sirve a nosotros para referencia
+          técnica, pero expone nombres de tablas/campos de GP que el usuario final no
+          necesita ni puede usar.
       <p className="text-sm text-gray-600 mb-4">
         GL20000 filtrado por rango de cuentas, mostrando solo SOURCDOC = PMTRX / PMVPY / PMVVR
         (movimientos generados desde una factura de compras, no asientos manuales).
       </p>
+      */}
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
         <div>

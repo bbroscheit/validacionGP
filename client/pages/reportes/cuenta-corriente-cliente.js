@@ -150,6 +150,8 @@ export default function CuentaCorrienteCliente() {
   return (
     <div>
       <h1 className="text-xl font-semibold mb-4">Cuenta corriente de cliente</h1>
+      {/* Comentado a pedido del usuario (2026-11-10): referencia técnica interna, no para el
+          usuario final.
       <p className="text-sm text-gray-600 mb-4">
         Historial completo del cliente (RM20101 - facturas, devoluciones, notas de
         crédito/débito y recibos, todas en una sola tabla). El saldo inicial suma TODO lo
@@ -162,6 +164,7 @@ export default function CuentaCorrienteCliente() {
         tienen saldo sin saldar HOY (incluye recibos con saldo sin aplicar) - no es una
         foto histórica.
       </p>
+      */}
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
         <div className="relative">

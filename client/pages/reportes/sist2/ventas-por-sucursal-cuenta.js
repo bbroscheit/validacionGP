@@ -129,11 +129,14 @@ export default function VentasPorSucursalCuentaSist2() {
   return (
     <div>
       <h1 className="text-xl font-semibold mb-4">Ventas por sucursal y cuenta contable (Sist2)</h1>
+      {/* Comentado a pedido del usuario (2026-11-10): referencia técnica interna, no para el
+          usuario final.
       <p className="text-sm text-gray-600 mb-4">
         GL20000 (asientos de ventas, SOURCDOC = SJ) por cuenta contable y sucursal,
         excluyendo la cuenta de deudores por ventas (113110-01-000, la contrapartida de cobro).
         Destildá una cuenta para dejarla afuera del total sin sacarla de la vista.
       </p>
+      */}
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
         <div>

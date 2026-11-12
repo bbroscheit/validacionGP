@@ -71,6 +71,8 @@ export default function CobranzasSist2() {
   return (
     <div>
       <h1 className="text-xl font-semibold mb-4">Cobranzas por sucursal (Sist2)</h1>
+      {/* Comentado a pedido del usuario (2026-11-10): referencia técnica interna, no para el
+          usuario final.
       <p className="text-sm text-gray-600 mb-4">
         Recibos del período (GL20000, CRJ/RMJ) agrupados por sucursal. Los recibos no tienen
         sucursal propia - se resuelve con la sucursal de la factura a la que están aplicados
@@ -79,6 +81,7 @@ export default function CobranzasSist2() {
         tampoco tienen sucursal en la ficha del cliente. Hacé click en una sucursal para
         ver y corregir los recibos que la componen.
       </p>
+      */}
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
         <div>

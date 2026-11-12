@@ -126,11 +126,14 @@ export default function ComprasPorSucursalCuenta() {
   return (
     <div>
       <h1 className="text-xl font-semibold mb-4">Compras por sucursal y cuenta contable</h1>
+      {/* Comentado a pedido del usuario (2026-11-10): referencia técnica interna, no para el
+          usuario final.
       <p className="text-sm text-gray-600 mb-4">
         GL20000 (asientos de compras, SOURCDOC = PMTRX/PMVVR) por cuenta contable y zona de
         Contabilidad Analítica, con todas las cuentas (incluida proveedores) sin filtrar
         nada por SQL. Destildá una cuenta para dejarla afuera del total sin sacarla de la vista.
       </p>
+      */}
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
         <div>

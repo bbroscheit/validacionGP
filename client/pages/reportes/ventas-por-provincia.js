@@ -77,12 +77,15 @@ export default function VentasPorProvincia() {
   return (
     <div>
       <h1 className="text-xl font-semibold mb-4">Ventas por provincia</h1>
+      {/* Comentado a pedido del usuario (2026-11-10): referencia técnica interna, no para el
+          usuario final.
       <p className="text-sm text-gray-600 mb-4">
         SOP30200 agrupado por provincia (STATE). El monto facturado es el neto (SUBTOTAL - BCKTXAMT,
         con signo invertido en notas de crédito) - la suma total debe cerrar contra el subtotal del
         libro IVA Ventas del mismo período. Hacé click en una provincia para ver y corregir los
         comprobantes que la componen.
       </p>
+      */}
 
       <form onSubmit={buscar} className="flex flex-wrap gap-3 items-end mb-6">
         <div>
