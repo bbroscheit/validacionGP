@@ -175,6 +175,60 @@ const atribuirSucursales = async (pool, rows, modoPendiente) => {
   });
 };
 
+// Fecha de inicio/fin de alquiler y N° de Alquiler de cada factura - a pedido del
+// usuario, para no tener que ir a buscarlo aparte. Fuente: II_SOP_DETALLE_NUEVO (tiene
+// una fila por LÍNEA de la factura, con el cruce al alquiler ya armado - Documento es el
+// mismo valor que SOP30200.SOPNUMBE/RM20101.DOCNUMBR). Confirmado contra datos reales de
+// sist2 (único Zona='ECOBAHIA' en esta tabla, cubre Factura y Devolución - SOPTYPE 3/4):
+// de 2392 documentos con alguna línea de alquiler, 2392/2392 matchean 1 a 1 contra
+// SOP30200.SOPNUMBE, y solo 2 tienen más de un N° de Alquiler/rango de fechas distinto en
+// la misma factura (una factura que facturó dos períodos consecutivos del mismo
+// alquiler) - para esos casos se devuelven los 3 valores separados por " / " (mismo
+// orden entre sí), en vez de quedarse con uno solo y perder el otro.
+const formatFechaCorta = (fecha) => {
+  const d = new Date(fecha);
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  return `${dd}/${mm}/${d.getUTCFullYear()}`;
+};
+
+const obtenerAlquilerPorDocumento = async (pool, documentos) => {
+  const docsLimpios = [...new Set(documentos.filter(Boolean))];
+  const mapa = new Map();
+  if (docsLimpios.length === 0) return mapa;
+
+  // 1 de cada 5 líneas de esta tabla no es una línea de alquiler (servicios/productos
+  // sueltos facturados junto con un alquiler en el mismo comprobante) y vienen con
+  // NroAlquiler/FechaDesde/FechaHasta en NULL - sin este filtro, esas líneas entraban al
+  // Map con `new Date(null)` = 01/01/1970 en vez de dejar la factura sin datos de
+  // alquiler (confirmado con un caso real: Documento "BB00000060", única línea con
+  // Producto "BA 1000-Alquiler mensual..." pero NroAlquiler NULL).
+  const filas = await fetchEnLotes(pool, (lista) => `
+    SELECT DISTINCT LTRIM(RTRIM(Documento)) AS Documento, LTRIM(RTRIM(NroAlquiler)) AS NroAlquiler,
+      FechaDesde, FechaHasta
+    FROM II_SOP_DETALLE_NUEVO
+    WHERE LTRIM(RTRIM(Documento)) IN (${lista})
+      AND NroAlquiler IS NOT NULL AND LTRIM(RTRIM(NroAlquiler)) <> ''
+  `, docsLimpios, 'd');
+
+  const porDocumento = new Map();
+  filas.forEach((f) => {
+    if (!porDocumento.has(f.Documento)) porDocumento.set(f.Documento, []);
+    porDocumento.get(f.Documento).push(f);
+  });
+
+  porDocumento.forEach((combos, documento) => {
+    combos.sort((a, b) => a.FechaDesde - b.FechaDesde);
+    mapa.set(documento, {
+      FechaInicio: combos.map((c) => formatFechaCorta(c.FechaDesde)).join(' / '),
+      FechaFin: combos.map((c) => formatFechaCorta(c.FechaHasta)).join(' / '),
+      NroAlquiler: combos.map((c) => c.NroAlquiler).join(' / '),
+    });
+  });
+
+  return mapa;
+};
+
 // "Montos pendientes": en vez del monto original del documento (ORTRXAMT), usa el
 // saldo TODAVÍA sin saldar de ese documento puntual (CURTRXAM - lo actualiza GP mismo
 // cada vez que se aplica un pago) y descarta los que ya están en $0. OJO: CURTRXAM es
@@ -242,14 +296,26 @@ const listadoClientes = async (pool, desde, hasta, sucursalFiltro, pendientes) =
     // movimientos posteriores a "hasta" no cuentan para el saldo a esa fecha - se ignoran.
   });
 
+  const alquilerPorDocumento = await obtenerAlquilerPorDocumento(
+    pool,
+    [...porCliente.values()].flatMap((c) => c.enRango.map((m) => m.Documento)),
+  );
+
   const clientes = [...porCliente.values()]
     .map((c) => {
       const saldoInicial = c.previos.reduce((acc, m) => acc + m.Monto, 0);
       let saldoCorrido = saldoInicial;
-      const movimientos = c.enRango.map((m) => {
+      // La consulta a RM20101 no trae ORDER BY (no hace falta para el saldo inicial, que
+      // es una suma) - pero el saldo CORRIDO de cada movimiento sí depende de procesarlos
+      // en orden cronológico, así que se ordena acá antes de calcularlo (mismo criterio
+      // que ya usa el modo "detalle": Fecha y, para empates del mismo día, Documento).
+      const enRangoOrdenado = [...c.enRango].sort((a, b) => a.Fecha - b.Fecha || a.Documento.localeCompare(b.Documento));
+      const movimientos = enRangoOrdenado.map((m) => {
         saldoCorrido += m.Monto;
+        const alquiler = alquilerPorDocumento.get(m.Documento);
         return {
           Fecha: m.Fecha, Tipo: m.Tipo, Documento: m.Documento,
+          FechaInicio: alquiler?.FechaInicio || '', FechaFin: alquiler?.FechaFin || '', NroAlquiler: alquiler?.NroAlquiler || '',
           Debe: m.Monto > 0 ? m.Monto : 0, Haber: m.Monto < 0 ? -m.Monto : 0,
           Saldo: saldoCorrido,
         };
@@ -267,7 +333,7 @@ const listadoClientes = async (pool, desde, hasta, sucursalFiltro, pendientes) =
   return {
     modo: 'listado',
     clientes,
-    columns: ['Fecha', 'Tipo', 'Documento', 'Debe', 'Haber', 'Saldo'],
+    columns: ['Fecha', 'Tipo', 'Documento', 'FechaInicio', 'FechaFin', 'NroAlquiler', 'Debe', 'Haber', 'Saldo'],
   };
 };
 
@@ -335,13 +401,19 @@ const getCuentaCorrienteSist2 = async ({ cliente, fechaDesde, fechaHasta, sucurs
     (!desde || m.DOCDATE >= desde) && (!hasta || m.DOCDATE <= hasta)
   ));
 
+  const alquilerPorDocumento = await obtenerAlquilerPorDocumento(pool, enRango.map((m) => m.Documento));
+
   let saldoCorrido = saldoInicial;
   const movimientos = enRango.map((m) => {
     saldoCorrido += m.Monto;
+    const alquiler = alquilerPorDocumento.get(m.Documento);
     return {
       Fecha: m.DOCDATE,
       Tipo: m.TipoMovimiento ?? '',
       Documento: m.Documento,
+      FechaInicio: alquiler?.FechaInicio || '',
+      FechaFin: alquiler?.FechaFin || '',
+      NroAlquiler: alquiler?.NroAlquiler || '',
       Debe: m.Monto > 0 ? m.Monto : 0,
       Haber: m.Monto < 0 ? -m.Monto : 0,
       Saldo: saldoCorrido,
@@ -354,7 +426,7 @@ const getCuentaCorrienteSist2 = async ({ cliente, fechaDesde, fechaHasta, sucurs
     saldoInicial,
     saldoFinal: movimientos.length > 0 ? movimientos[movimientos.length - 1].Saldo : saldoInicial,
     movimientos,
-    columns: ['Fecha', 'Tipo', 'Documento', 'Debe', 'Haber', 'Saldo'],
+    columns: ['Fecha', 'Tipo', 'Documento', 'FechaInicio', 'FechaFin', 'NroAlquiler', 'Debe', 'Haber', 'Saldo'],
     truncated: movResult.recordset.length >= MAX_ROWS,
   };
 };

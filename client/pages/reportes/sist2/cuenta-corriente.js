@@ -88,7 +88,7 @@ export default function CuentaCorrienteSist2() {
     consultar(clienteSeleccionado ? clienteSeleccionado.CUSTNMBR : null);
   };
 
-  const COLUMNAS_CC_EXCEL = ["Cliente", "Nombre", "Fecha", "Tipo", "Documento", "Debe", "Haber", "Saldo"];
+  const COLUMNAS_CC_EXCEL = ["Cliente", "Nombre", "Fecha", "Tipo", "Documento", "FechaInicio", "FechaFin", "NroAlquiler", "Debe", "Haber", "Saldo"];
 
   // Arma, por cliente, su cuenta corriente completa como filas planas (una fila de
   // "Saldo inicial" arriba, los movimientos, una fila de "Saldo final" abajo, y una fila
@@ -96,11 +96,12 @@ export default function CuentaCorrienteSist2() {
   // pero en una sola hoja de Excel, sin tener que armar tablas separadas por cliente
   // (json_to_sheet solo soporta una tabla homogénea por hoja).
   const armarFilasCuentaCorriente = (clientes) => clientes.flatMap((c) => [
-    { Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: "", Tipo: "", Documento: "Saldo inicial", Debe: null, Haber: null, Saldo: c.saldoInicial },
+    { Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: "", Tipo: "", Documento: "Saldo inicial", FechaInicio: "", FechaFin: "", NroAlquiler: "", Debe: null, Haber: null, Saldo: c.saldoInicial },
     ...c.movimientos.map((m) => ({
-      Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: formatFecha(m.Fecha), Tipo: m.Tipo, Documento: m.Documento, Debe: m.Debe, Haber: m.Haber, Saldo: m.Saldo,
+      Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: formatFecha(m.Fecha), Tipo: m.Tipo, Documento: m.Documento,
+      FechaInicio: m.FechaInicio, FechaFin: m.FechaFin, NroAlquiler: m.NroAlquiler, Debe: m.Debe, Haber: m.Haber, Saldo: m.Saldo,
     })),
-    { Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: "", Tipo: "", Documento: "Saldo final", Debe: null, Haber: null, Saldo: c.saldoFinal },
+    { Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: "", Tipo: "", Documento: "Saldo final", FechaInicio: "", FechaFin: "", NroAlquiler: "", Debe: null, Haber: null, Saldo: c.saldoFinal },
     {},
   ]);
 
@@ -126,7 +127,8 @@ export default function CuentaCorrienteSist2() {
       }
 
       const base = data.clientes.flatMap((c) => c.movimientos.map((m) => ({
-        Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: formatFecha(m.Fecha), Tipo: m.Tipo, Documento: m.Documento, Debe: m.Debe, Haber: m.Haber, Saldo: m.Saldo,
+        Cliente: c.CUSTNMBR, Nombre: c.CUSTNAME, Fecha: formatFecha(m.Fecha), Tipo: m.Tipo, Documento: m.Documento,
+        FechaInicio: m.FechaInicio, FechaFin: m.FechaFin, NroAlquiler: m.NroAlquiler, Debe: m.Debe, Haber: m.Haber, Saldo: m.Saldo,
       })));
 
       const { exportCuentaCorrienteExcel } = await import("@/functions/exportCuentaCorrienteExcel");
@@ -263,6 +265,9 @@ export default function CuentaCorrienteSist2() {
                         <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Fecha</th>
                         <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Tipo</th>
                         <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Documento</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">F. Inicio</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">F. Fin</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">N° Alquiler</th>
                         <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Debe</th>
                         <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Haber</th>
                         <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Saldo</th>
@@ -270,7 +275,7 @@ export default function CuentaCorrienteSist2() {
                     </thead>
                     <tbody>
                       <tr className="bg-gray-100 italic">
-                        <td className="px-4 py-2 border-b border-[var(--color-border)]" colSpan={5}>Saldo inicial</td>
+                        <td className="px-4 py-2 border-b border-[var(--color-border)]" colSpan={8}>Saldo inicial</td>
                         <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(c.saldoInicial)}</td>
                       </tr>
                       {c.movimientos.map((m, i) => (
@@ -278,6 +283,9 @@ export default function CuentaCorrienteSist2() {
                           <td className="px-4 py-2 border-b border-[var(--color-border)] whitespace-nowrap">{formatFecha(m.Fecha)}</td>
                           <td className="px-4 py-2 border-b border-[var(--color-border)] whitespace-nowrap">{m.Tipo}</td>
                           <td className="px-4 py-2 border-b border-[var(--color-border)] whitespace-nowrap">{m.Documento}</td>
+                          <td className="px-4 py-2 border-b border-[var(--color-border)] whitespace-nowrap">{m.FechaInicio}</td>
+                          <td className="px-4 py-2 border-b border-[var(--color-border)] whitespace-nowrap">{m.FechaFin}</td>
+                          <td className="px-4 py-2 border-b border-[var(--color-border)] whitespace-nowrap">{m.NroAlquiler}</td>
                           <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{m.Debe ? formatMonto(m.Debe) : ""}</td>
                           <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{m.Haber ? formatMonto(m.Haber) : ""}</td>
                           <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(m.Saldo)}</td>
@@ -286,7 +294,7 @@ export default function CuentaCorrienteSist2() {
                     </tbody>
                     <tfoot>
                       <tr className="bg-gray-100 font-semibold">
-                        <td className="px-4 py-2 border-t-2 border-[var(--color-border)]" colSpan={5}>Saldo final</td>
+                        <td className="px-4 py-2 border-t-2 border-[var(--color-border)]" colSpan={8}>Saldo final</td>
                         <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(c.saldoFinal)}</td>
                       </tr>
                     </tfoot>
@@ -333,9 +341,9 @@ export default function CuentaCorrienteSist2() {
                   [{
                     name: "Cuenta corriente",
                     rows: [
-                      { Fecha: "", Tipo: "", Documento: "Saldo inicial", Debe: null, Haber: null, Saldo: data.saldoInicial },
+                      { Fecha: "", Tipo: "", Documento: "Saldo inicial", FechaInicio: "", FechaFin: "", NroAlquiler: "", Debe: null, Haber: null, Saldo: data.saldoInicial },
                       ...data.movimientos.map((m) => ({ ...m, Fecha: formatFecha(m.Fecha) })),
-                      { Fecha: "", Tipo: "", Documento: "Saldo final", Debe: null, Haber: null, Saldo: data.saldoFinal },
+                      { Fecha: "", Tipo: "", Documento: "Saldo final", FechaInicio: "", FechaFin: "", NroAlquiler: "", Debe: null, Haber: null, Saldo: data.saldoFinal },
                     ],
                     columns: data.columns,
                   }],
@@ -355,6 +363,9 @@ export default function CuentaCorrienteSist2() {
                   <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Fecha</th>
                   <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Tipo</th>
                   <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">Documento</th>
+                  <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">F. Inicio</th>
+                  <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">F. Fin</th>
+                  <th className="px-4 py-2 text-left font-medium text-gray-600 border-b border-[var(--color-border)]">N° Alquiler</th>
                   <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Debe</th>
                   <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Haber</th>
                   <th className="px-4 py-2 text-right font-medium text-gray-600 border-b border-[var(--color-border)]">Saldo</th>
@@ -362,7 +373,7 @@ export default function CuentaCorrienteSist2() {
               </thead>
               <tbody>
                 <tr className="bg-gray-100 italic">
-                  <td className="px-4 py-2 border-b border-[var(--color-border)]" colSpan={5}>Saldo inicial</td>
+                  <td className="px-4 py-2 border-b border-[var(--color-border)]" colSpan={8}>Saldo inicial</td>
                   <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{formatMonto(data.saldoInicial)}</td>
                 </tr>
                 {data.movimientos.map((row, i) => (
@@ -370,18 +381,21 @@ export default function CuentaCorrienteSist2() {
                     <td className="px-4 py-2 border-b border-[var(--color-border)] whitespace-nowrap">{formatFecha(row.Fecha)}</td>
                     <td className="px-4 py-2 border-b border-[var(--color-border)] whitespace-nowrap">{row.Tipo}</td>
                     <td className="px-4 py-2 border-b border-[var(--color-border)] whitespace-nowrap">{row.Documento}</td>
+                    <td className="px-4 py-2 border-b border-[var(--color-border)] whitespace-nowrap">{row.FechaInicio}</td>
+                    <td className="px-4 py-2 border-b border-[var(--color-border)] whitespace-nowrap">{row.FechaFin}</td>
+                    <td className="px-4 py-2 border-b border-[var(--color-border)] whitespace-nowrap">{row.NroAlquiler}</td>
                     <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{row.Debe ? formatMonto(row.Debe) : ""}</td>
                     <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums">{row.Haber ? formatMonto(row.Haber) : ""}</td>
                     <td className="px-4 py-2 text-right border-b border-[var(--color-border)] tabular-nums font-medium">{formatMonto(row.Saldo)}</td>
                   </tr>
                 ))}
                 {data.movimientos.length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-3 text-center text-gray-500">Sin movimientos en el rango elegido.</td></tr>
+                  <tr><td colSpan={9} className="px-4 py-3 text-center text-gray-500">Sin movimientos en el rango elegido.</td></tr>
                 )}
               </tbody>
               <tfoot>
                 <tr className="bg-gray-100 font-semibold">
-                  <td className="px-4 py-2 border-t-2 border-[var(--color-border)]" colSpan={5}>Saldo final</td>
+                  <td className="px-4 py-2 border-t-2 border-[var(--color-border)]" colSpan={8}>Saldo final</td>
                   <td className="px-4 py-2 text-right border-t-2 border-[var(--color-border)] tabular-nums">{formatMonto(data.saldoFinal)}</td>
                 </tr>
               </tfoot>

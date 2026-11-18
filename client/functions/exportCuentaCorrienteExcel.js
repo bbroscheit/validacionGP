@@ -38,7 +38,11 @@ const ESTILO_SALDO_FINAL = {
 };
 const ESTILO_NORMAL = { border: ESTILO_BORDE };
 
-const ANCHOS_COLUMNA_CC = { Cliente: 10, Nombre: 32, Fecha: 12, Tipo: 20, Documento: 22, Debe: 15, Haber: 15, Saldo: 16 };
+const ANCHOS_COLUMNA_CC = {
+  Cliente: 10, Nombre: 32, Fecha: 12, Tipo: 20, Documento: 22,
+  FechaInicio: 13, FechaFin: 13, NroAlquiler: 14,
+  Debe: 15, Haber: 15, Saldo: 16,
+};
 const COLUMNAS_MONTO_CC = ["Debe", "Haber", "Saldo"];
 const MARCADORES_CC = ["Saldo inicial", "Saldo final"];
 
