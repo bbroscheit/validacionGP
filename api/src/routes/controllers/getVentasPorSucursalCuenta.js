@@ -66,6 +66,9 @@ const getVentasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, soloConP = t
   if (!getPool) throw new Error(`Empresa desconocida: "${empresa}"`);
   const pool = await getPool();
   const soloConPBool = soloConP === false || soloConP === 'false' ? false : true;
+  // Basani (PRD01): facturas de exportación (DOCID "FV E"/"NC E"/"ND E") no llevan la
+  // "P" de comprobante fiscal porque no pasan por ARCA - ver detalle en getVentas.js.
+  const condicionExportBasani = empresa === 'basani' ? " OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '__ E%'" : '';
   const cuentasDeudores = CUENTA_DEUDORES_POR_EMPRESA[empresa];
   const accatnumContrapartida = ACCATNUM_CONTRAPARTIDA_POR_EMPRESA[empresa] || [];
 
@@ -90,7 +93,7 @@ const getVentasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, soloConP = t
       AND G.TRXDATE <= @fechaHasta
       AND ${condCuentaDeudoresCount}
       AND ${condAccatnumCount}
-      AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%')
+      AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%'${condicionExportBasani})
   `);
   const totalCount = count.recordset[0].total;
 
@@ -132,7 +135,7 @@ const getVentasPorSucursalCuenta = async ({ fechaDesde, fechaHasta, soloConP = t
         AND G.TRXDATE <= @fechaHasta
         AND ${condCuentaDeudoresDetalle}
         AND ${condAccatnumDetalle}
-        AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%')
+        AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%'${condicionExportBasani})
       ORDER BY Cuenta ASC
     `),
     getOverridesMap({ empresa, tipo: 'sucursal' }),

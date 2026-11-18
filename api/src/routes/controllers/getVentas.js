@@ -88,6 +88,14 @@ const getVentas = async ({ sucursal, fechaDesde, fechaHasta, soloConP = true, em
   const pool = await getPool();
   const soloConPBool = soloConP === false || soloConP === 'false' ? false : true;
 
+  // Basani (PRD01): facturas de exportación (DOCID "FV E0001/E0003", "NC E0001",
+  // "ND E0001" - ej. SOPNUMBE "FV E0003-00000156") no llevan la "P" de comprobante
+  // fiscal porque son de exportación y no pasan por ARCA - a pedido del usuario, deben
+  // entrar igual a los reportes de Ventas aunque "soloConP" esté activo. Confirmado
+  // contra PRD01 real: esos 4 DOCID son los únicos con ese patrón ("XX E" + dígitos) y
+  // ninguno de sus 117 comprobantes tiene "P".
+  const condicionExportBasani = empresa === 'basani' ? " OR H.SOPNUMBE LIKE '__ E%'" : '';
+
   const bindFilters = (request) => {
     request.input('sucursal', sql.VarChar(10), sucursal || null);
     request.input('fechaDesde', sql.DateTime, fechaDesde ? new Date(fechaDesde) : null);
@@ -104,7 +112,7 @@ const getVentas = async ({ sucursal, fechaDesde, fechaHasta, soloConP = true, em
       (@sucursal IS NULL OR H.LOCNCODE = @sucursal)
       AND (@fechaDesde IS NULL OR H.DOCDATE >= @fechaDesde)
       AND (@fechaHasta IS NULL OR H.DOCDATE <= @fechaHasta)
-      AND (@soloConP = 0 OR H.SOPNUMBE LIKE '%P%')
+      AND (@soloConP = 0 OR H.SOPNUMBE LIKE '%P%'${condicionExportBasani})
       AND ISNULL(H.VOIDSTTS, 0) = 0 -- excluye comprobantes anulados en GP (no son ventas reales)
   `);
   const totalCount = count.recordset[0].total;
@@ -168,7 +176,7 @@ const getVentas = async ({ sucursal, fechaDesde, fechaHasta, soloConP = true, em
       (@sucursal IS NULL OR H.LOCNCODE = @sucursal)
       AND (@fechaDesde IS NULL OR H.DOCDATE >= @fechaDesde)
       AND (@fechaHasta IS NULL OR H.DOCDATE <= @fechaHasta)
-      AND (@soloConP = 0 OR H.SOPNUMBE LIKE '%P%')
+      AND (@soloConP = 0 OR H.SOPNUMBE LIKE '%P%'${condicionExportBasani})
       AND ISNULL(H.VOIDSTTS, 0) = 0
     ORDER BY H.DOCDATE ASC
   `);
@@ -183,7 +191,7 @@ const getVentas = async ({ sucursal, fechaDesde, fechaHasta, soloConP = true, em
         AND (@sucursal IS NULL OR H.LOCNCODE = @sucursal)
         AND (@fechaDesde IS NULL OR H.DOCDATE >= @fechaDesde)
         AND (@fechaHasta IS NULL OR H.DOCDATE <= @fechaHasta)
-        AND (@soloConP = 0 OR H.SOPNUMBE LIKE '%P%')
+        AND (@soloConP = 0 OR H.SOPNUMBE LIKE '%P%'${condicionExportBasani})
         AND ISNULL(H.VOIDSTTS, 0) = 0
     )
   `);

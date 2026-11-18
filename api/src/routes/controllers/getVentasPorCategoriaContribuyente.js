@@ -81,6 +81,9 @@ const getVentasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta, solo
 
   const pool = await POOLS[empresa]();
   const soloConPBool = soloConP === false || soloConP === 'false' ? false : true;
+  // Basani (PRD01): facturas de exportación (DOCID "FV E"/"NC E"/"ND E") no llevan la
+  // "P" de comprobante fiscal porque no pasan por ARCA - ver detalle en getVentas.js.
+  const condicionExportBasani = empresa === 'basani' ? " OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '__ E%'" : '';
   const {
     cuentasContrapartida: CUENTAS_CONTRAPARTIDA,
     accatnumContrapartida: ACCATNUM_CONTRAPARTIDA,
@@ -110,7 +113,7 @@ const getVentasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta, solo
       AND ${contrapartidaCount}
       AND ${accatnumContrapartidaCount}
       AND ${accatnumImpuestosCount}
-      AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%')
+      AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%'${condicionExportBasani})
   `);
   const totalCount = count.recordset[0].total;
 
@@ -140,7 +143,7 @@ const getVentasPorCategoriaContribuyente = async ({ fechaDesde, fechaHasta, solo
       AND ${contrapartidaDetalle}
       AND ${accatnumContrapartidaDetalle}
       AND ${accatnumImpuestosDetalle}
-      AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%')
+      AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%'${condicionExportBasani})
     ORDER BY Categoria ASC
   `);
 

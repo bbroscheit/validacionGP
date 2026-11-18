@@ -47,6 +47,9 @@ const getAsientoVentas = async ({ fechaDesde, fechaHasta, sucursal, soloConP = t
   const pool = await getPool();
   const soloConPBool = soloConP === false || soloConP === 'false' ? false : true;
   const sucursalFiltro = sucursal ? sucursal.trim() : null;
+  // Basani (PRD01): facturas de exportación (DOCID "FV E"/"NC E"/"ND E") no llevan la
+  // "P" de comprobante fiscal porque no pasan por ARCA - ver detalle en getVentas.js.
+  const condicionExportBasani = empresa === 'basani' ? " OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '__ E%'" : '';
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
@@ -74,7 +77,7 @@ const getAsientoVentas = async ({ fechaDesde, fechaHasta, sucursal, soloConP = t
       LTRIM(RTRIM(G.SOURCDOC)) = 'SJ'
       AND G.TRXDATE >= @fechaDesde
       AND G.TRXDATE <= @fechaHasta
-      AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%')
+      AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%'${condicionExportBasani})
   `);
   const totalCount = count.recordset[0].total;
 
@@ -97,7 +100,7 @@ const getAsientoVentas = async ({ fechaDesde, fechaHasta, sucursal, soloConP = t
         LTRIM(RTRIM(G.SOURCDOC)) = 'SJ'
         AND G.TRXDATE >= @fechaDesde
         AND G.TRXDATE <= @fechaHasta
-        AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%')
+        AND (@soloConP = 0 OR LTRIM(RTRIM(G.ORDOCNUM)) LIKE '%P%'${condicionExportBasani})
       ORDER BY Cuenta ASC
     `),
     getOverridesMap({ empresa, tipo: 'sucursal' }),

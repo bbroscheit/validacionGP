@@ -52,6 +52,9 @@ const getVentasPorSucursal = async ({ fechaDesde, fechaHasta, soloConP = true, e
   if (!getPool) throw new Error(`Empresa desconocida: "${empresa}"`);
   const pool = await getPool();
   const soloConPBool = soloConP === false || soloConP === 'false' ? false : true;
+  // Basani (PRD01): facturas de exportación (DOCID "FV E"/"NC E"/"ND E") no llevan la
+  // "P" de comprobante fiscal porque no pasan por ARCA - ver detalle en getVentas.js.
+  const condicionExportBasani = empresa === 'basani' ? " OR H.SOPNUMBE LIKE '__ E%'" : '';
 
   const bindFilters = (request) => {
     request.input('fechaDesde', sql.DateTime, new Date(fechaDesde));
@@ -67,7 +70,7 @@ const getVentasPorSucursal = async ({ fechaDesde, fechaHasta, soloConP = true, e
     WHERE
       H.DOCDATE >= @fechaDesde
       AND H.DOCDATE <= @fechaHasta
-      AND (@soloConP = 0 OR H.SOPNUMBE LIKE '%P%')
+      AND (@soloConP = 0 OR H.SOPNUMBE LIKE '%P%'${condicionExportBasani})
       AND ISNULL(H.VOIDSTTS, 0) = 0 -- excluye comprobantes anulados en GP (no son ventas reales)
   `);
   const totalCount = count.recordset[0].total;
@@ -94,7 +97,7 @@ const getVentasPorSucursal = async ({ fechaDesde, fechaHasta, soloConP = true, e
       WHERE
         H.DOCDATE >= @fechaDesde
         AND H.DOCDATE <= @fechaHasta
-        AND (@soloConP = 0 OR H.SOPNUMBE LIKE '%P%')
+        AND (@soloConP = 0 OR H.SOPNUMBE LIKE '%P%'${condicionExportBasani})
         AND ISNULL(H.VOIDSTTS, 0) = 0
       ORDER BY H.DOCDATE ASC
     `),
