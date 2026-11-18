@@ -325,10 +325,14 @@ const listarMovimientos = async ({ banco, desde, hasta, busqueda = '', soloFalta
   // La columna ESTADO del excel del banco, en la práctica, identifica la sucursal del
   // movimiento (ej. "MADRYN", "MDQ", "CENTRAL", "LA PAMPA"), no un estado de la
   // transacción - de ahí el desplegable para filtrar por sucursal en esa misma columna.
+  // E-cheq no tiene columna ESTADO (su `estadoBanco` siempre viene null) - ahí la
+  // sucursal es "Endosado por" (a quién se le endosó el cheque, que en la práctica es la
+  // sucursal que lo recibió) - a pedido del usuario.
   // Se calcula sobre el rango de fechas completo (antes de aplicar busqueda/soloFaltantes/
   // filtroRecibo/sucursal), así las opciones del desplegable no cambian solo porque se
   // tocó otro filtro.
-  const sucursalesDisponibles = [...new Set(conPendiente.map((f) => f.estadoBanco).filter(Boolean))].sort();
+  const campoSucursal = (f) => (banco === 'echeq' ? f.endosadoPor : f.estadoBanco);
+  const sucursalesDisponibles = [...new Set(conPendiente.map(campoSucursal).filter(Boolean))].sort();
 
   const busquedaNorm = String(busqueda || '').trim().toLowerCase();
   const soloFaltantesBool = soloFaltantes === true || soloFaltantes === 'true';
@@ -344,7 +348,7 @@ const listarMovimientos = async ({ banco, desde, hasta, busqueda = '', soloFalta
       .includes(busquedaNorm))
     .filter((f) => !soloFaltantesBool || f.pendiente)
     .filter((f) => !filtroRecibo || (filtroRecibo === 'si' ? f.reciboCreado : !f.reciboCreado))
-    .filter((f) => !sucursal || f.estadoBanco === sucursal);
+    .filter((f) => !sucursal || campoSucursal(f) === sucursal);
 
   return {
     filas: filtradas,

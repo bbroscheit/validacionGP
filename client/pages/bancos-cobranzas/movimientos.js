@@ -578,21 +578,19 @@ export default function BancosCobranzasMovimientos() {
           <input type="checkbox" checked={soloFaltantes} onChange={(e) => setSoloFaltantes(e.target.checked)} />
           Mostrar solo sin identificar
         </label>
-        {!esEcheq && (
-          <div>
-            <label className="block text-sm mb-1">Sucursal (columna Estado)</label>
-            <select
-              value={sucursal}
-              onChange={(e) => setSucursal(e.target.value)}
-              className="border border-[var(--color-border)] rounded px-2 py-1.5"
-            >
-              <option value="">Todas</option>
-              {(data?.sucursalesDisponibles || []).map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-          </div>
-        )}
+        <div>
+          <label className="block text-sm mb-1">{esEcheq ? "Sucursal (Endosado por)" : "Sucursal (columna Estado)"}</label>
+          <select
+            value={sucursal}
+            onChange={(e) => setSucursal(e.target.value)}
+            className="border border-[var(--color-border)] rounded px-2 py-1.5"
+          >
+            <option value="">Todas</option>
+            {(data?.sucursalesDisponibles || []).map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </div>
         <div>
           <label className="block text-sm mb-1">Recibo en GP</label>
           <select
