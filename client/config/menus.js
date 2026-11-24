@@ -10,7 +10,6 @@ export const menus = [
     links: [
       { href: "/ventas", label: "Ventas" },
       { href: "/compras", label: "Compras" },
-      { href: "/gastos", label: "Gastos" },
       { href: "/gastos/recibos", label: "Recibos" },
       { href: "/gastos/pagos", label: "Pagos" },
       { href: "/gastos/compras", label: "Compras (GL)" },
@@ -33,6 +32,7 @@ export const menus = [
   {
     label: "Compras",
     links: [
+      { href: "/gastos", label: "Gastos" },
       { href: "/reportes/compras-por-sucursal", label: "Compras por sucursal" },
       { href: "/reportes/compras-por-sucursal-cuenta", label: "Compras por sucursal y cuenta" },
       { href: "/reportes/asiento-compras", label: "Asiento de compras" },
